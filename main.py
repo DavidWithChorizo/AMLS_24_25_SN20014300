@@ -61,3 +61,9 @@ from torchsummary import summary
 from torchviz import make_dot
 from tqdm.notebook import tqdm  # For progress bars in Jupyter
 import matplotlib.gridspec as gridspec
+
+
+
+
+# We then need to import the datasets from the medmnist website. 
+from medmnist import BreastMNIST, BloodMNIST
