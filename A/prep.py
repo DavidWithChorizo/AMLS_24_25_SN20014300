@@ -1,30 +1,3 @@
-import numpy as np
-from pathlib import Path
-
-def load_npz_dataset(npz_path):
-    """
-    Load dataset from an .npz file.
-
-    Args:
-        npz_path (str): Path to the .npz file.
-
-    Returns:
-        dict: Dictionary containing 'train_images', 'train_labels', 'val_images', 'val_labels', 'test_images', 'test_labels'.
-    """
-    data = np.load(npz_path)
-    dataset = {
-        'train_images': data['train_images'],  # Shape: (546, 1, 28, 28)
-        'train_labels': data['train_labels'],  # Shape: (546,)
-        'val_images': data['val_images'],      # Shape: (78, 1, 28, 28)
-        'val_labels': data['val_labels'],      # Shape: (78,)
-        'test_images': data['test_images'],    # Shape: (156, 1, 28, 28)
-        'test_labels': data['test_labels']     # Shape: (156,)
-    }
-    return dataset
-
-
-
-
 import os
 import numpy as np
 from pathlib import Path
@@ -33,16 +6,41 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from pathlib import Path
+import torchvision.transforms as transforms
+from torch.utils.data import Dataset
+from PIL import Image
+import numpy as np
 
-# 1. Define Relative Paths
 
-# Get the directory of the current script
-script_dir = Path(__file__).parent.resolve()
-# Construct the relative path to the dataset
-bloodmnist_path = script_dir.parent / 'Datasets' / 'BloodMNIST' / 'bloodmnist.npz'
-breastmnist_path = script_dir.parent / 'Datasets' / 'BreastMNIST' / 'breastmnist.npz'
 
-# 2. Load the .npz Files
+
+# 1. Set the Path to the Dataset
+def get_breastmnist_path():
+    """
+    Get the relative path to the BreastMNIST dataset.
+
+    This function constructs and returns the relative path to the BreastMNIST dataset
+    based on the location of the current script.
+
+    Returns:
+        Path: The relative path to the BreastMNIST dataset.
+    """
+    # Get the directory of the current script
+    script_dir = Path(__file__).parent.resolve()
+    
+    # Construct the relative path to the dataset
+    breastmnist_path = script_dir.parent / 'Datasets' / 'BreastMNIST' / 'breastmnist.npz'
+    
+    return breastmnist_path
+
+
+
+
+
+
+# 2. Load Dataset
 def load_npz_dataset(npz_path):
 
     """
@@ -57,24 +55,55 @@ def load_npz_dataset(npz_path):
 
     data = np.load(npz_path)
     dataset = {
-        'train_images': data['train_images'],  # Shape: (546, 1, 28, 28)
-        'train_labels': data['train_labels'],  # Shape: (546,)
-        'val_images': data['val_images'],      # Shape: (78, 1, 28, 28)
-        'val_labels': data['val_labels'],      # Shape: (78,)
-        'test_images': data['test_images'],    # Shape: (156, 1, 28, 28)
-        'test_labels': data['test_labels']     # Shape: (156,)
+        'train_images': data['train_images'],  
+        'train_labels': data['train_labels'],  
+        'val_images': data['val_images'],      
+        'val_labels': data['val_labels'],      
+        'test_images': data['test_images'],    
+        'test_labels': data['test_labels']   
     }
     return dataset
 
-# Example usage:
-breastmnist_data = load_npz_dataset(breastmnist_path)
-bloodmnist_data = load_npz_dataset(bloodmnist_path)
 
-# visually check if these datasets are loaded correctly
-print(breastmnist_data.keys())
-print(breastmnist_data['train_images'].shape)
 
-# 3. Define Transformations
+
+#3. Apply Transformations
+def get_transformations():
+    """
+    Get the transformations for training, validation, and test datasets.
+
+    This function returns the transformations to be applied to the images in the
+    training, validation, and test datasets. The transformations include data
+    augmentation techniques for the training dataset and normalization for all datasets.
+
+    Returns:
+        tuple: A tuple containing two transformations:
+            - transform_train: Transformation for the training dataset.
+            - transform_val_test: Transformation for the validation and test datasets.
+    """
+    # Transformation for validation and test datasets
+    # Converts images to tensors and normalizes them with mean and std of 0.5
+    transform_val_test = transforms.Compose([
+        transforms.ToTensor(),  # Convert PIL Image or numpy.ndarray to tensor
+        transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize tensor with mean and std of 0.5
+    ])
+
+    # Transformation for training dataset
+    # Includes data augmentation techniques and normalization
+    transform_train = transforms.Compose([
+        transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
+        transforms.RandomVerticalFlip(),  # Randomly flip the image vertically
+        transforms.RandomRotation(30),  # Randomly rotate the image by up to 30 degrees
+        transforms.ToTensor(),  # Convert PIL Image or numpy.ndarray to tensor
+        transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize tensor with mean and std of 0.5
+    ])
+
+    return transform_train, transform_val_test
+
+# Example usage
+transform_train, transform_val_test = get_transformations()
+
+'''#3. Apply Transformations
 transform_val_test = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.5], std=[0.5])
@@ -87,6 +116,77 @@ transform_train = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.5], std=[0.5])
 ])
+'''
+
+
+#4. Provide a custom dataset class to handle the MedMNIST dataset, including loading images and labels, applying transformations, and providing the length and individual items of the dataset.
+class MedMNISTDataset(Dataset):
+    """
+    Custom Dataset class for MedMNIST.
+
+    This class handles the MedMNIST dataset, including loading images and labels,
+    applying transformations, and providing the length and individual items of the dataset.
+
+    Attributes:
+        images (numpy.ndarray): Array of images.
+        labels (numpy.ndarray): Array of labels corresponding to the images.
+        transform (callable, optional): Optional transform to be applied on an image sample.
+    """
+
+    def __init__(self, images, labels, transform=None):
+        """
+        Initialize the MedMNISTDataset.
+
+        Args:
+            images (numpy.ndarray): Array of images.
+            labels (numpy.ndarray): Array of labels corresponding to the images.
+            transform (callable, optional): Optional transform to be applied on an image sample.
+        """
+        self.images = images
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        """
+        Return the number of samples in the dataset.
+
+        Returns:
+            int: Number of samples in the dataset.
+        """
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        """
+        Retrieve a sample from the dataset at the specified index.
+
+        Args:
+            idx (int): Index of the sample to retrieve.
+
+        Returns:
+            tuple: (image, label) where image is the transformed image and label is the corresponding label.
+        """
+        # Get the image and label at the specified index
+        image = self.images[idx]  # Shape: (1, 28, 28)
+        label = self.labels[idx]
+
+        # Convert the image to a PIL Image
+        # Squeeze removes single-dimensional entries from the shape of an array
+        # Multiply by 255 to convert to the range [0, 255]
+        # 'L' mode is for grayscale images
+        image = Image.fromarray(np.uint8(image.squeeze() * 255), mode='L')
+
+        # Apply the transformation if specified
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label
+
+# Example usage
+# Assuming images and labels are numpy arrays loaded from a dataset
+# images = np.load('path_to_images.npy')
+# labels = np.load('path_to_labels.npy')
+# transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
+# dataset = MedMNISTDataset(images, labels, transform)
 
 # 4. Create Custom Dataset Class
 class MedMNISTDataset(Dataset):
@@ -144,6 +244,15 @@ breast_train_loader, breast_val_loader, breast_test_loader = create_dataloaders(
 
 # 6. Flatten Data for Traditional ML (Optional)
 def flatten_data(dataset_dict):
+    '''
+    Flatten the images for traditional machine learning algorithms.
+
+    Args:
+        dataset_dict (dict): Dictionary containing 'train_images', 'train_labels', 'val_images', 'val_labels', 'test_images', 'test_labels'.
+
+    Returns:
+        tuple: Tuple containing X_train, y_train, X_val, y_val, X_test, y_test.
+    '''
     X_train = dataset_dict['train_images'].reshape(dataset_dict['train_images'].shape[0], -1)
     y_train = dataset_dict['train_labels']
 
@@ -159,6 +268,18 @@ def flatten_data(dataset_dict):
 
 # 7. Preprocess Features for Traditional ML (Optional)
 def preprocess_features(X_train, X_val, X_test, n_components=50):
+    '''
+    Preprocess features using StandardScaler and PCA.
+
+    Args:
+        X_train (ndarray): Training features.
+        X_val (ndarray): Validation features.
+        X_test (ndarray): Test features.
+        n_components (int): Number of principal components.
+
+    Returns:
+        tuple: Tuple containing X_train_pca, X_val_pca, X_test_pca, scaler, pca.
+    '''
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
@@ -176,6 +297,16 @@ X_b_train_pca, X_b_val_pca, X_b_test_pca = transformed_data
 
 # 8. Visualize Sample Data
 def visualize_samples(loader, class_names, num_samples=5):
+    '''
+    Visualize sample images from the DataLoader.
+
+    Args:
+        loader (DataLoader): DataLoader object.
+        class_names (list): List of class names.
+        num_samples (int): Number of samples to visualize.
+
+    Return: A plot of sample images.
+    '''
     dataiter = iter(loader)
     images, labels = dataiter.next()
     images = images.numpy()
