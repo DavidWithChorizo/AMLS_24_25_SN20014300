@@ -67,3 +67,31 @@ import matplotlib.gridspec as gridspec
 
 # We then need to import the datasets from the medmnist website. 
 from medmnist import BreastMNIST, BloodMNIST
+
+# Define the paths for the folders
+breastmnist_folder = 'BreastMNIST'
+bloodmnist_folder = 'BloodMNIST'
+
+
+# Load the datasets
+breastmnist_train = BreastMNIST(split='train', download=True)
+breastmnist_val = BreastMNIST(split='val', download=True)
+breastmnist_test = BreastMNIST(split='test', download=True)
+
+bloodmnist_train = BloodMNIST(split='train', download=True)
+bloodmnist_val = BloodMNIST(split='val', download=True)
+bloodmnist_test = BloodMNIST(split='test', download=True)
+
+# Function to save dataset to folder
+def save_dataset(dataset, folder):
+    for idx, (img, label) in enumerate(dataset):
+        img.save(os.path.join(folder, f'{idx}_{label}.png'))
+
+# Save the datasets into the respective folders
+save_dataset(breastmnist_train, os.path.join(breastmnist_folder, 'train'))
+save_dataset(breastmnist_val, os.path.join(breastmnist_folder, 'val'))
+save_dataset(breastmnist_test, os.path.join(breastmnist_folder, 'test'))
+
+save_dataset(bloodmnist_train, os.path.join(bloodmnist_folder, 'train'))
+save_dataset(bloodmnist_val, os.path.join(bloodmnist_folder, 'val'))
+save_dataset(bloodmnist_test, os.path.join(bloodmnist_folder, 'test'))
