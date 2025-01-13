@@ -33,6 +33,13 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+import torch.nn as nn
+
+
+
+
+#------------------------------------------------------------------- Task A Dataset Preparation Codes -------------------------------------------------------------------#
+
 
 
 # 1. Set the Path to the Dataset
@@ -48,7 +55,6 @@ def get_breastmnist_path():
     """
     # Get the directory of the current script
     script_dir = Path(__file__).parent.resolve()
-    
     # Construct the relative path to the dataset
     breastmnist_path = script_dir.parent / 'Datasets' / 'BreastMNIST' / 'breastmnist.npz'
     
@@ -335,3 +341,44 @@ def visualize_samples(loader, class_names, num_samples=5):
         ax.set_title(class_names[labels[idx]])
         ax.axis('off')
     plt.show()
+
+
+
+
+
+
+
+#------------------------------------------------------------------- Task A Model Training Codes -------------------------------------------------------------------#
+
+# 1. Define the CNN Model
+
+class CNNModel_Breast(nn.Module):
+    """
+    CNN model for binary classification of BreastMNIST images.
+    """
+    def __init__(self, hidden_units=128, dropout=0.5):
+        super(CNNModel_Breast, self).__init__()
+        # Convolutional layer 1: Input channels=1 (grayscale), Output channels=32, Kernel size=3, Padding=1
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        # Max pooling layer: Reduces spatial dimensions by a factor of 2
+        self.pool = nn.MaxPool2d(2, 2)
+        # Convolutional layer 2: Input channels=32, Output channels=64, Kernel size=3, Padding=1
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        # Fully connected layer 1: Input size=64*7*7 (assuming input image size 28x28), Output size=hidden_units
+        self.fc1 = nn.Linear(64 * 7 * 7, hidden_units)
+        # Dropout layer: Dropout rate=dropout
+        self.dropout = nn.Dropout(dropout)
+        # Fully connected layer 2: Output size=2 (binary classification)
+        self.fc2 = nn.Linear(hidden_units, 2)
+
+    def forward(self, x):
+        """
+        Forward pass of the model.
+        """
+        x = self.pool(nn.functional.relu(self.conv1(x)))
+        x = self.pool(nn.functional.relu(self.conv2(x)))
+        x = x.view(-1, 64 * 7 * 7)  # Flatten the tensor
+        x = nn.functional.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
