@@ -236,11 +236,8 @@ def create_dataloaders(dataset_dict, batch_size=32):
 
     return train_loader, val_loader, test_loader
 
-# Create DataLoaders for BloodMNIST
-blood_train_loader, blood_val_loader, blood_test_loader = create_dataloaders(bloodmnist_data, batch_size=32)
 
-# Create DataLoaders for BreastMNIST
-breast_train_loader, breast_val_loader, breast_test_loader = create_dataloaders(breastmnist_data, batch_size=32)
+
 
 # 6. Flatten Data for Traditional ML (Optional)
 def flatten_data(dataset_dict):
@@ -264,7 +261,7 @@ def flatten_data(dataset_dict):
 
     return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
-(X_b_train, y_b_train), (X_b_val, y_b_val), (X_b_test, y_b_test) = flatten_data(breastmnist_data)
+
 
 # 7. Preprocess Features for Traditional ML (Optional)
 def preprocess_features(X_train, X_val, X_test, n_components=50):
@@ -292,8 +289,7 @@ def preprocess_features(X_train, X_val, X_test, n_components=50):
 
     return (X_train_pca, X_val_pca, X_test_pca), scaler, pca
 
-transformed_data, scaler, pca = preprocess_features(X_b_train, X_b_val, X_b_test, n_components=50)
-X_b_train_pca, X_b_val_pca, X_b_test_pca = transformed_data
+
 
 # 8. Visualize Sample Data
 def visualize_samples(loader, class_names, num_samples=5):
