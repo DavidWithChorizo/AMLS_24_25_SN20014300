@@ -18,3 +18,4 @@ scikit-plot
 torchsummary
 torchviz
 gitpython
+optuna
