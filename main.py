@@ -382,3 +382,51 @@ class CNNModel_Breast(nn.Module):
         x = self.dropout(x)
         x = self.fc2(x)
         return x
+
+
+# Added on the 15th of January 2025.
+
+class MedMNISTDataset(Dataset):
+    """
+    Custom Dataset class for MedMNIST.
+    """
+    def __init__(self, images, labels, transform=None):
+        """
+        Initialize the dataset with images, labels, and transformations.
+
+        Args:
+            images (numpy.ndarray): Array of images with shape (num_samples, 1, 28, 28).
+            labels (numpy.ndarray): Array of labels with shape (num_samples,).
+            transform (callable, optional): Transformations to apply to each image.
+        """
+        self.images = images
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        """
+        Returns the total number of samples in the dataset.
+        """
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        """
+        Retrieves the image and label at the specified index.
+
+        Args:
+            idx (int): Index of the sample to retrieve.
+
+        Returns:
+            tuple: (transformed_image, label)
+        """
+        image = self.images[idx]  # Shape: (1, 28, 28)
+        label = self.labels[idx]
+
+        # Convert to PIL Image
+        image = Image.fromarray(np.uint8(image.squeeze() * 255), mode='L')  # 'L' for grayscale
+
+        # Apply transformations
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label
