@@ -430,3 +430,214 @@ class MedMNISTDataset(Dataset):
             image = self.transform(image)
 
         return image, label
+    
+
+
+def initialize_csv_log(log_file):
+    """
+    Initialize the CSV log file with headers.
+
+    Args:
+        log_file (str): Path to the CSV log file.
+    """
+    with open(log_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Timestamp', 'Model', 'Epoch', 'Train Loss', 'Val Loss', 'Train Acc', 'Val Acc'])
+
+
+def append_csv_log(log_file, model_name, epoch, train_loss, val_loss, train_acc, val_acc):
+    """
+    Append a new entry to the CSV log file.
+
+    Args:
+        log_file (str): Path to the CSV log file.
+        model_name (str): Name of the model ('CNN' or 'RandomForest').
+        epoch (int): Current epoch number.
+        train_loss (float): Training loss.
+        val_loss (float): Validation loss.
+        train_acc (float): Training accuracy.
+        val_acc (float): Validation accuracy.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(log_file, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([timestamp, model_name, epoch, train_loss, val_loss, train_acc, val_acc])
+
+
+def optimize_and_train_cnn(train_loader, val_loader, device, log_file, model_save_path, n_trials=20):
+    """
+    Optimize hyperparameters and train the CNN model using Optuna.
+
+    Args:
+        train_loader (DataLoader): DataLoader for training data.
+        val_loader (DataLoader): DataLoader for validation data.
+        device (torch.device): Device to train the model on.
+        log_file (str): Path to the CSV log file.
+        model_save_path (str): Path to save the best model.
+        n_trials (int): Number of Optuna trials for hyperparameter optimization.
+
+    Returns:
+        CNNModel: Best-trained CNN model.
+        dict: Best hyperparameters found by Optuna.
+    """
+    initialize_csv_log(log_file)
+
+    def objective(trial: Trial):
+        # Suggest hyperparameters
+        hidden_units = trial.suggest_categorical('hidden_units', [64, 128, 256])
+        dropout = trial.suggest_uniform('dropout', 0.3, 0.7)
+        learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
+        num_epochs = trial.suggest_int('num_epochs', 10, 30)
+
+        # Initialize the model
+        model = CNNModel(hidden_units=hidden_units, dropout=dropout).to(device)
+
+        # Define loss and optimizer
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+        history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+        best_val_acc = 0.0
+
+        for epoch in range(num_epochs):
+            # Training Phase
+            model.train()
+            running_loss = 0.0
+            correct = 0
+            total = 0
+            for images, labels in train_loader:
+                images, labels = images.to(device), labels.to(device)
+                optimizer.zero_grad()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item() * images.size(0)
+                _, predicted = torch.max(outputs, 1)
+                correct += (predicted == labels).sum().item()
+                total += labels.size(0)
+
+            train_loss = running_loss / total
+            train_acc = correct / total
+
+            # Validation Phase
+            model.eval()
+            val_loss = 0.0
+            correct = 0
+            total = 0
+            with torch.no_grad():
+                for images, labels in val_loader:
+                    images, labels = images.to(device), labels.to(device)
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+
+                    val_loss += loss.item() * images.size(0)
+                    _, predicted = torch.max(outputs, 1)
+                    correct += (predicted == labels).sum().item()
+                    total += labels.size(0)
+
+            val_loss = val_loss / total
+            val_acc = correct / total
+
+            history["train_loss"].append(train_loss)
+            history["val_loss"].append(val_loss)
+            history["train_acc"].append(train_acc)
+            history["val_acc"].append(val_acc)
+
+            # Logging
+            append_csv_log(log_file, 'CNN', epoch+1, train_loss, val_loss, train_acc, val_acc)
+
+            # Reporting to Optuna
+            trial.report(val_acc, epoch)
+
+            # Handle pruning based on intermediate value
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+        return val_acc
+
+    # Create Optuna study
+    sampler = TPESampler(seed=42)
+    study = optuna.create_study(direction='maximize', sampler=sampler)
+    study.optimize(objective, n_trials=n_trials)
+
+    print("Number of finished trials: ", len(study.trials))
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: ", trial.value)
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")
+
+    # Train the best model
+    best_hidden_units = trial.params['hidden_units']
+    best_dropout = trial.params['dropout']
+    best_learning_rate = trial.params['learning_rate']
+    best_num_epochs = trial.params['num_epochs']
+
+    best_model = CNNModel(hidden_units=best_hidden_units, dropout=best_dropout).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(best_model.parameters(), lr=best_learning_rate)
+
+    best_history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+    best_val_acc_overall = 0.0
+
+    for epoch in range(best_num_epochs):
+        # Training Phase
+        best_model.train()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = best_model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * images.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+        train_loss = running_loss / total
+        train_acc = correct / total
+
+        # Validation Phase
+        best_model.eval()
+        val_loss = 0.0
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = best_model(images)
+                loss = criterion(outputs, labels)
+
+                val_loss += loss.item() * images.size(0)
+                _, predicted = torch.max(outputs, 1)
+                correct += (predicted == labels).sum().item()
+                total += labels.size(0)
+
+        val_loss = val_loss / total
+        val_acc = correct / total
+
+        best_history["train_loss"].append(train_loss)
+        best_history["val_loss"].append(val_loss)
+        best_history["train_acc"].append(train_acc)
+        best_history["val_acc"].append(val_acc)
+
+        # Logging
+        append_csv_log(log_file, 'CNN', epoch+1, train_loss, val_loss, train_acc, val_acc)
+
+        # Save best model
+        if val_acc > best_val_acc_overall:
+            best_val_acc_overall = val_acc
+            torch.save(best_model.state_dict(), model_save_path)
+            print(f"Best model updated at epoch {epoch+1} with Val Acc: {val_acc:.4f}")
+
+    print(f"Best Validation Accuracy: {best_val_acc_overall:.4f}")
+    return best_model, trial.params, best_history, best_val_acc_overall
