@@ -641,3 +641,104 @@ def optimize_and_train_cnn(train_loader, val_loader, device, log_file, model_sav
 
     print(f"Best Validation Accuracy: {best_val_acc_overall:.4f}")
     return best_model, trial.params, best_history, best_val_acc_overall
+
+
+
+
+
+def optimize_and_train_random_forest(X_train, y_train, X_val, y_val, log_file, model_save_path, n_trials=20):
+    """
+    Optimize hyperparameters and train the Random Forest model using Optuna.
+
+    Args:
+        X_train (numpy.ndarray): Training features.
+        y_train (numpy.ndarray): Training labels.
+        X_val (numpy.ndarray): Validation features.
+        y_val (numpy.ndarray): Validation labels.
+        log_file (str): Path to the CSV log file.
+        model_save_path (str): Path to save the best model.
+        n_trials (int): Number of Optuna trials for hyperparameter optimization.
+
+    Returns:
+        RandomForestClassifier: Best-trained Random Forest model.
+        dict: Best hyperparameters found by Optuna.
+    """
+    initialize_csv_log(log_file)
+
+    def objective(trial: Trial):
+        # Suggest hyperparameters
+        n_estimators = trial.suggest_int('n_estimators', 100, 1000)
+        max_depth = trial.suggest_int('max_depth', 5, 50)
+        min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
+        min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
+        max_features = trial.suggest_categorical('max_features', ['auto', 'sqrt', 'log2'])
+        class_weight = trial.suggest_categorical('class_weight', ['balanced', None])
+
+        # Initialize the model
+        rf = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            max_features=max_features,
+            class_weight=class_weight,
+            random_state=42,
+            n_jobs=-1
+        )
+
+        # Train the model
+        rf.fit(X_train, y_train)
+
+        # Validate the model
+        val_acc = rf.score(X_val, y_val)
+
+        # Report to Optuna
+        trial.report(val_acc, step=0)
+
+        # Handle pruning
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
+
+        return val_acc
+
+    # Create Optuna study
+    sampler = TPESampler(seed=42)
+    study = optuna.create_study(direction='maximize', sampler=sampler)
+    study.optimize(objective, n_trials=n_trials)
+
+    print("Number of finished trials: ", len(study.trials))
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: ", trial.value)
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")
+
+    # Train the best model
+    best_params = trial.params
+    best_rf = RandomForestClassifier(
+        n_estimators=best_params['n_estimators'],
+        max_depth=best_params['max_depth'],
+        min_samples_split=best_params['min_samples_split'],
+        min_samples_leaf=best_params['min_samples_leaf'],
+        max_features=best_params['max_features'],
+        class_weight=best_params['class_weight'],
+        random_state=42,
+        n_jobs=-1
+    )
+
+    best_rf.fit(X_train, y_train)
+
+    # Evaluate on validation set
+    val_acc = best_rf.score(X_val, y_val)
+
+    # Logging
+    append_csv_log(log_file, 'RandomForest', 1, None, None, None, val_acc)
+
+    # Save the best model
+    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+    joblib.dump(best_rf, model_save_path)
+    print(f"Best Random Forest model saved to {model_save_path} with Val Acc: {val_acc:.4f}")
+
+    return best_rf, best_params
