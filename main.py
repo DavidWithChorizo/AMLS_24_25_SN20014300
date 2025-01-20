@@ -1,26 +1,19 @@
 import os
 import numpy as np
 from pathlib import Path
-from torchvision import transforms
-from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-from pathlib import Path
-import torchvision.transforms as transforms
-from torch.utils.data import Dataset
-from PIL import Image
-import numpy as np
-import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 import matplotlib.pyplot as plt
 from itertools import product
 from tqdm.auto import tqdm
 from timeit import default_timer as timer
 import joblib
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
@@ -29,14 +22,7 @@ from optuna import Trial
 from optuna.samplers import TPESampler
 import csv
 import datetime
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from PIL import Image
-import numpy as np
-import torch.nn as nn
-
-
-
+from medmnist import BreastMNIST 
 
 #------------------------------------------------------------------- Task A Dataset Preparation Codes -------------------------------------------------------------------#
 
