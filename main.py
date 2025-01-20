@@ -42,6 +42,29 @@ import torch.nn as nn
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'''
 # 1. Set the Path to the Dataset
 def get_breastmnist_path():
     """
@@ -128,20 +151,6 @@ def get_transformations():
 # Example usage
 transform_train, transform_val_test = get_transformations()
 
-'''#3. Apply Transformations
-transform_val_test = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
-
-transform_train = transforms.Compose([
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomVerticalFlip(),
-    transforms.RandomRotation(30),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
-'''
 
 
 #4. Provide a custom dataset class to handle the MedMNIST dataset, including loading images and labels, applying transformations, and providing the length and individual items of the dataset.
@@ -266,15 +275,7 @@ def create_dataloaders(dataset_dict, batch_size=32):
 
 # 6. Flatten Data for Traditional ML (Optional)
 def flatten_data(dataset_dict):
-    '''
-    Flatten the images for traditional machine learning algorithms.
 
-    Args:
-        dataset_dict (dict): Dictionary containing 'train_images', 'train_labels', 'val_images', 'val_labels', 'test_images', 'test_labels'.
-
-    Returns:
-        tuple: Tuple containing X_train, y_train, X_val, y_val, X_test, y_test.
-    '''
     X_train = dataset_dict['train_images'].reshape(dataset_dict['train_images'].shape[0], -1)
     y_train = dataset_dict['train_labels']
 
@@ -290,18 +291,7 @@ def flatten_data(dataset_dict):
 
 # 7. Preprocess Features for Traditional ML (Optional)
 def preprocess_features(X_train, X_val, X_test, n_components=50):
-    '''
-    Preprocess features using StandardScaler and PCA.
 
-    Args:
-        X_train (ndarray): Training features.
-        X_val (ndarray): Validation features.
-        X_test (ndarray): Test features.
-        n_components (int): Number of principal components.
-
-    Returns:
-        tuple: Tuple containing X_train_pca, X_val_pca, X_test_pca, scaler, pca.
-    '''
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
@@ -318,16 +308,6 @@ def preprocess_features(X_train, X_val, X_test, n_components=50):
 
 # 8. Visualize Sample Data
 def visualize_samples(loader, class_names, num_samples=5):
-    '''
-    Visualize sample images from the DataLoader.
-
-    Args:
-        loader (DataLoader): DataLoader object.
-        class_names (list): List of class names.
-        num_samples (int): Number of samples to visualize.
-
-    Return: A plot of sample images.
-    '''
     dataiter = iter(loader)
     images, labels = dataiter.next()
     images = images.numpy()
@@ -344,7 +324,7 @@ def visualize_samples(loader, class_names, num_samples=5):
 
 
 
-
+'''
 
 
 
