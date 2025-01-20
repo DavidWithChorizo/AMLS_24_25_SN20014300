@@ -22,267 +22,164 @@ from optuna import Trial
 from optuna.samplers import TPESampler
 import csv
 import datetime
-from medmnist import BreastMNIST 
+from medmnist import BreastMNIST, BloodMNIST
 
-#------------------------------------------------------------------- Task A Dataset Preparation Codes -------------------------------------------------------------------#
-
-
+#------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
 
+#--------------------------------- Task Agnostic Codes ---------------------------------#
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'''
-# 1. Set the Path to the Dataset
-def get_breastmnist_path():
+#Calculate Mean and Standard Deviation for Normalization
+def calculate_mean_std(dataset_loader):
     """
-    Get the relative path to the BreastMNIST dataset.
-
-    This function constructs and returns the relative path to the BreastMNIST dataset
-    based on the location of the current script.
-
-    Returns:
-        Path: The relative path to the BreastMNIST dataset.
-    """
-    # Get the directory of the current script
-    script_dir = Path(__file__).parent.resolve()
-    # Construct the relative path to the dataset
-    breastmnist_path = script_dir.parent / 'Datasets' / 'BreastMNIST' / 'breastmnist.npz'
-    
-    return breastmnist_path
-
-
-
-
-
-
-# 2. Load Dataset
-def load_npz_dataset(npz_path):
-
-    """
-    Load dataset from an .npz file.
+    Calculate the mean and standard deviation for normalization based on the dataset.
 
     Args:
-        npz_path (str): Path to the .npz file.
+        dataset_loader (DataLoader): DataLoader for the dataset to compute statistics.
 
     Returns:
-        dict: Dictionary containing 'train_images', 'train_labels', 'val_images', 'val_labels', 'test_images', 'test_labels'.
+        tuple: (mean, std) where both are lists containing mean and standard deviation per channel.
     """
+    mean = 0.0
+    std = 0.0
+    total_samples = 0
 
-    data = np.load(npz_path)
-    dataset = {
-        'train_images': data['train_images'],  
-        'train_labels': data['train_labels'],  
-        'val_images': data['val_images'],      
-        'val_labels': data['val_labels'],      
-        'test_images': data['test_images'],    
-        'test_labels': data['test_labels']   
-    }
-    return dataset
+    # Compute mean and std for each channel
+    for inputs, _ in dataset_loader:
+        batch_samples = inputs.size(0)
+        mean += inputs.mean([0, 2, 3]) * batch_samples
+        std += inputs.std([0, 2, 3]) * batch_samples
+        total_samples += batch_samples
+
+    mean /= total_samples
+    std /= total_samples
+    return mean.tolist(), std.tolist()
 
 
 
 
-#3. Apply Transformations
-def get_transformations():
+
+
+
+
+#CNN Transformation Pipeline (With Augmentation)
+def get_transforms_for_cnn(mean: list, std: list):
     """
-    Get the transformations for training, validation, and test datasets.
+    Define transformation pipelines for CNN (training + validation/testing).
 
-    This function returns the transformations to be applied to the images in the
-    training, validation, and test datasets. The transformations include data
-    augmentation techniques for the training dataset and normalization for all datasets.
+    Args:
+        mean (list): Mean values for normalization.
+        std (list): Standard deviation values for normalization.
 
     Returns:
-        tuple: A tuple containing two transformations:
-            - transform_train: Transformation for the training dataset.
-            - transform_val_test: Transformation for the validation and test datasets.
+        tuple: (transform_train, transform_val_test)
+            where transform_train includes data augmentation,
+            and transform_val_test includes only normalization.
     """
-    # Transformation for validation and test datasets
-    # Converts images to tensors and normalizes them with mean and std of 0.5
-    transform_val_test = transforms.Compose([
-        transforms.ToTensor(),  # Convert PIL Image or numpy.ndarray to tensor
-        transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize tensor with mean and std of 0.5
+    transform_train = transforms.Compose([
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(degrees=20),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
     ])
 
-    # Transformation for training dataset
-    # Includes data augmentation techniques and normalization
-    transform_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
-        transforms.RandomVerticalFlip(),  # Randomly flip the image vertically
-        transforms.RandomRotation(30),  # Randomly rotate the image by up to 30 degrees
-        transforms.ToTensor(),  # Convert PIL Image or numpy.ndarray to tensor
-        transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize tensor with mean and std of 0.5
+    transform_val_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
     ])
 
     return transform_train, transform_val_test
 
-# Example usage
-transform_train, transform_val_test = get_transformations()
 
 
 
-#4. Provide a custom dataset class to handle the MedMNIST dataset, including loading images and labels, applying transformations, and providing the length and individual items of the dataset.
-class MedMNISTDataset(Dataset):
+
+
+#Random Forest Transformation Pipeline (Without Augmentation)
+def get_transforms_for_rf(mean: list, std: list):
     """
-    Custom Dataset class for MedMNIST.
+    Define transformation pipelines for Random Forest (training + validation/testing).
 
-    This class handles the MedMNIST dataset, including loading images and labels,
-    applying transformations, and providing the length and individual items of the dataset.
+    Args:
+        mean (list): Mean values for normalization.
+        std (list): Standard deviation values for normalization.
 
-    Attributes:
-        images (numpy.ndarray): Array of images.
-        labels (numpy.ndarray): Array of labels corresponding to the images.
-        transform (callable, optional): Optional transform to be applied on an image sample.
+    Returns:
+        tuple: (transform_train, transform_val_test)
+            where transform_train includes only normalization,
+            and transform_val_test includes only normalization.
     """
+    transform_train = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
 
-    def __init__(self, images, labels, transform=None):
-        """
-        Initialize the MedMNISTDataset.
+    transform_val_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
 
-        Args:
-            images (numpy.ndarray): Array of images.
-            labels (numpy.ndarray): Array of labels corresponding to the images.
-            transform (callable, optional): Optional transform to be applied on an image sample.
-        """
-        self.images = images
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        """
-        Return the number of samples in the dataset.
-
-        Returns:
-            int: Number of samples in the dataset.
-        """
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        """
-        Retrieve a sample from the dataset at the specified index.
-
-        Args:
-            idx (int): Index of the sample to retrieve.
-
-        Returns:
-            tuple: (image, label) where image is the transformed image and label is the corresponding label.
-        """
-        # Get the image and label at the specified index
-        image = self.images[idx]  # Shape: (1, 28, 28)
-        label = self.labels[idx]
-
-        # Convert the image to a PIL Image
-        # Squeeze removes single-dimensional entries from the shape of an array
-        # Multiply by 255 to convert to the range [0, 255]
-        # 'L' mode is for grayscale images
-        image = Image.fromarray(np.uint8(image.squeeze() * 255), mode='L')
-
-        # Apply the transformation if specified
-        if self.transform:
-            image = self.transform(image)
-
-        return image, label
-
-# Example usage
-# Assuming images and labels are numpy arrays loaded from a dataset
-# images = np.load('path_to_images.npy')
-# labels = np.load('path_to_labels.npy')
-# transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
-# dataset = MedMNISTDataset(images, labels, transform)
-
-# 4. Create Custom Dataset Class
-class MedMNISTDataset(Dataset):
-    def __init__(self, images, labels, transform=None):
-        self.images = images
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        image = self.images[idx]  # Shape: (1, 28, 28)
-        label = self.labels[idx]
-
-        # Convert to PIL Image
-        image = Image.fromarray(np.uint8(image.squeeze() * 255), mode='L')  # 'L' mode for grayscale
-
-        if self.transform:
-            image = self.transform(image)
-
-        return image, label
-
-# 5. Create DataLoaders
-def create_dataloaders(dataset_dict, batch_size=32):
-    train_dataset = MedMNISTDataset(
-        images=dataset_dict['train_images'],
-        labels=dataset_dict['train_labels'],
-        transform=transform_train
-    )
-
-    val_dataset = MedMNISTDataset(
-        images=dataset_dict['val_images'],
-        labels=dataset_dict['val_labels'],
-        transform=transform_val_test
-    )
-
-    test_dataset = MedMNISTDataset(
-        images=dataset_dict['test_images'],
-        labels=dataset_dict['test_labels'],
-        transform=transform_val_test
-    )
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
-
-    return train_loader, val_loader, test_loader
+    return transform_train, transform_val_test
 
 
 
 
-# 6. Flatten Data for Traditional ML (Optional)
-def flatten_data(dataset_dict):
-
-    X_train = dataset_dict['train_images'].reshape(dataset_dict['train_images'].shape[0], -1)
-    y_train = dataset_dict['train_labels']
-
-    X_val = dataset_dict['val_images'].reshape(dataset_dict['val_images'].shape[0], -1)
-    y_val = dataset_dict['val_labels']
-
-    X_test = dataset_dict['test_images'].reshape(dataset_dict['test_images'].shape[0], -1)
-    y_test = dataset_dict['test_labels']
-
-    return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
 
 
-# 7. Preprocess Features for Traditional ML (Optional)
-def preprocess_features(X_train, X_val, X_test, n_components=50):
 
+
+#Flattening Features for Random Forest
+def flatten_features(data_loader: DataLoader):
+    """
+    Flatten all batches of data in a DataLoader for use in Random Forest.
+
+    Args:
+        data_loader (DataLoader): PyTorch DataLoader object.
+
+    Returns:
+        tuple: (X, y) where X is a 2D numpy array of flattened features, 
+               and y is a 1D numpy array of labels.
+    """
+    X, y = [], []
+    for inputs, labels in data_loader:
+        # Flatten [batch_size, channels, height, width] -> [batch_size, channels*height*width]
+        flattened = inputs.view(inputs.size(0), -1).numpy()
+        X.append(flattened)
+        y.append(labels.numpy())
+    X = np.concatenate(X, axis=0)
+    y = np.concatenate(y, axis=0)
+    return X, y
+
+
+
+
+
+
+
+
+#Data Preprocessing for Random Forest (Standardization + PCA)
+def preprocess_for_rf(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray, n_components=50):
+    """
+    Standardize the data and reduce dimensionality using PCA for Random Forest.
+
+    Args:
+        X_train (numpy.ndarray): Training features.
+        X_val (numpy.ndarray): Validation features.
+        X_test (numpy.ndarray): Test features.
+        n_components (int): Number of PCA components.
+
+    Returns:
+        tuple: ((X_train_pca, X_val_pca, X_test_pca), scaler, pca)
+    """
+    # Standardization
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_val_scaled = scaler.transform(X_val)
     X_test_scaled = scaler.transform(X_test)
 
+    # PCA
     pca = PCA(n_components=n_components)
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_val_pca = pca.transform(X_val_scaled)
@@ -292,419 +189,271 @@ def preprocess_features(X_train, X_val, X_test, n_components=50):
 
 
 
-# 8. Visualize Sample Data
-def visualize_samples(loader, class_names, num_samples=5):
-    dataiter = iter(loader)
-    images, labels = dataiter.next()
-    images = images.numpy()
 
-    fig, axes = plt.subplots(1, num_samples, figsize=(15,3))
-    for idx in range(num_samples):
-        ax = axes[idx]
-        img = images[idx].squeeze()
-        img = (img * 0.5) + 0.5  # Denormalize to [0,1]
-        ax.imshow(img, cmap='gray')
-        ax.set_title(class_names[labels[idx]])
-        ax.axis('off')
-    plt.show()
+#--------------------------------- Task Specific Codes: Task A (Breast) ---------------------------------#
 
 
 
-'''
-
-
-
-#------------------------------------------------------------------- Task A Model Training Codes -------------------------------------------------------------------#
-
-# 1. Define the CNN Model
-
-class CNNModel_Breast(nn.Module):
+#Load BreastMNIST Datasets with Corresponding Transformations
+def load_breastmnist_datasets(
+    batch_size: int,
+    download: bool,
+    data_dir: str,
+    transform_train_cnn,
+    transform_val_test_cnn,
+    transform_train_rf,
+    transform_val_test_rf
+):
     """
-    CNN model for binary classification of BreastMNIST images.
-    """
-    def __init__(self, hidden_units=128, dropout=0.5):
-        super(CNNModel_Breast, self).__init__()
-        # Convolutional layer 1: Input channels=1 (grayscale), Output channels=32, Kernel size=3, Padding=1
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
-        # Max pooling layer: Reduces spatial dimensions by a factor of 2
-        self.pool = nn.MaxPool2d(2, 2)
-        # Convolutional layer 2: Input channels=32, Output channels=64, Kernel size=3, Padding=1
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        # Fully connected layer 1: Input size=64*7*7 (assuming input image size 28x28), Output size=hidden_units
-        self.fc1 = nn.Linear(64 * 7 * 7, hidden_units)
-        # Dropout layer: Dropout rate=dropout
-        self.dropout = nn.Dropout(dropout)
-        # Fully connected layer 2: Output size=2 (binary classification)
-        self.fc2 = nn.Linear(hidden_units, 2)
-
-    def forward(self, x):
-        """
-        Forward pass of the model.
-        """
-        x = self.pool(nn.functional.relu(self.conv1(x)))
-        x = self.pool(nn.functional.relu(self.conv2(x)))
-        x = x.view(-1, 64 * 7 * 7)  # Flatten the tensor
-        x = nn.functional.relu(self.fc1(x))
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
-
-
-# Added on the 15th of January 2025.
-
-class MedMNISTDataset(Dataset):
-    """
-    Custom Dataset class for MedMNIST.
-    """
-    def __init__(self, images, labels, transform=None):
-        """
-        Initialize the dataset with images, labels, and transformations.
-
-        Args:
-            images (numpy.ndarray): Array of images with shape (num_samples, 1, 28, 28).
-            labels (numpy.ndarray): Array of labels with shape (num_samples,).
-            transform (callable, optional): Transformations to apply to each image.
-        """
-        self.images = images
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        """
-        Returns the total number of samples in the dataset.
-        """
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        """
-        Retrieves the image and label at the specified index.
-
-        Args:
-            idx (int): Index of the sample to retrieve.
-
-        Returns:
-            tuple: (transformed_image, label)
-        """
-        image = self.images[idx]  # Shape: (1, 28, 28)
-        label = self.labels[idx]
-
-        # Convert to PIL Image
-        image = Image.fromarray(np.uint8(image.squeeze() * 255), mode='L')  # 'L' for grayscale
-
-        # Apply transformations
-        if self.transform:
-            image = self.transform(image)
-
-        return image, label
-    
-
-
-def initialize_csv_log(log_file):
-    """
-    Initialize the CSV log file with headers.
+    Load BreastMNIST datasets for both CNN and Random Forest with corresponding transformations.
 
     Args:
-        log_file (str): Path to the CSV log file.
-    """
-    with open(log_file, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['Timestamp', 'Model', 'Epoch', 'Train Loss', 'Val Loss', 'Train Acc', 'Val Acc'])
-
-
-def append_csv_log(log_file, model_name, epoch, train_loss, val_loss, train_acc, val_acc):
-    """
-    Append a new entry to the CSV log file.
-
-    Args:
-        log_file (str): Path to the CSV log file.
-        model_name (str): Name of the model ('CNN' or 'RandomForest').
-        epoch (int): Current epoch number.
-        train_loss (float): Training loss.
-        val_loss (float): Validation loss.
-        train_acc (float): Training accuracy.
-        val_acc (float): Validation accuracy.
-    """
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(log_file, mode='a', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow([timestamp, model_name, epoch, train_loss, val_loss, train_acc, val_acc])
-
-
-def optimize_and_train_cnn(train_loader, val_loader, device, log_file, model_save_path, n_trials=20):
-    """
-    Optimize hyperparameters and train the CNN model using Optuna.
-
-    Args:
-        train_loader (DataLoader): DataLoader for training data.
-        val_loader (DataLoader): DataLoader for validation data.
-        device (torch.device): Device to train the model on.
-        log_file (str): Path to the CSV log file.
-        model_save_path (str): Path to save the best model.
-        n_trials (int): Number of Optuna trials for hyperparameter optimization.
+        batch_size (int): Number of samples per batch.
+        download (bool): Whether to download the dataset if not present.
+        data_dir (str): Directory where the dataset is stored or will be downloaded to.
+        transform_train_cnn (transforms.Compose): Training transform for CNN.
+        transform_val_test_cnn (transforms.Compose): Val/test transform for CNN.
+        transform_train_rf (transforms.Compose): Training transform for RF.
+        transform_val_test_rf (transforms.Compose): Val/test transform for RF.
 
     Returns:
-        CNNModel: Best-trained CNN model.
-        dict: Best hyperparameters found by Optuna.
+        tuple: 
+            - (cnn_train_loader, cnn_val_loader, cnn_test_loader)
+            - (rf_train_loader, rf_val_loader, rf_test_loader)
     """
-    initialize_csv_log(log_file)
+    # Load datasets for CNN
+    train_dataset_cnn = BreastMNIST(split='train', transform=transform_train_cnn, download=download, root=data_dir)
+    val_dataset_cnn   = BreastMNIST(split='val',   transform=transform_val_test_cnn, download=download, root=data_dir)
+    test_dataset_cnn  = BreastMNIST(split='test',  transform=transform_val_test_cnn, download=download, root=data_dir)
 
-    def objective(trial: Trial):
-        # Suggest hyperparameters
-        hidden_units = trial.suggest_categorical('hidden_units', [64, 128, 256])
-        dropout = trial.suggest_uniform('dropout', 0.3, 0.7)
-        learning_rate = trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
-        num_epochs = trial.suggest_int('num_epochs', 10, 30)
+    # Create DataLoaders for CNN
+    cnn_train_loader = DataLoader(train_dataset_cnn, batch_size=batch_size, shuffle=True)
+    cnn_val_loader   = DataLoader(val_dataset_cnn,   batch_size=batch_size, shuffle=False)
+    cnn_test_loader  = DataLoader(test_dataset_cnn,  batch_size=batch_size, shuffle=False)
 
-        # Initialize the model
-        model = CNNModel(hidden_units=hidden_units, dropout=dropout).to(device)
+    # Load datasets for Random Forest
+    train_dataset_rf = BreastMNIST(split='train', transform=transform_train_rf, download=download, root=data_dir)
+    val_dataset_rf   = BreastMNIST(split='val',   transform=transform_val_test_rf, download=download, root=data_dir)
+    test_dataset_rf  = BreastMNIST(split='test',  transform=transform_val_test_rf, download=download, root=data_dir)
 
-        # Define loss and optimizer
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    # Create DataLoaders for Random Forest (no shuffle needed)
+    rf_train_loader = DataLoader(train_dataset_rf, batch_size=batch_size, shuffle=False)
+    rf_val_loader   = DataLoader(val_dataset_rf,   batch_size=batch_size, shuffle=False)
+    rf_test_loader  = DataLoader(test_dataset_rf,  batch_size=batch_size, shuffle=False)
 
-        history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
-        best_val_acc = 0.0
-
-        for epoch in range(num_epochs):
-            # Training Phase
-            model.train()
-            running_loss = 0.0
-            correct = 0
-            total = 0
-            for images, labels in train_loader:
-                images, labels = images.to(device), labels.to(device)
-                optimizer.zero_grad()
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
-
-                running_loss += loss.item() * images.size(0)
-                _, predicted = torch.max(outputs, 1)
-                correct += (predicted == labels).sum().item()
-                total += labels.size(0)
-
-            train_loss = running_loss / total
-            train_acc = correct / total
-
-            # Validation Phase
-            model.eval()
-            val_loss = 0.0
-            correct = 0
-            total = 0
-            with torch.no_grad():
-                for images, labels in val_loader:
-                    images, labels = images.to(device), labels.to(device)
-                    outputs = model(images)
-                    loss = criterion(outputs, labels)
-
-                    val_loss += loss.item() * images.size(0)
-                    _, predicted = torch.max(outputs, 1)
-                    correct += (predicted == labels).sum().item()
-                    total += labels.size(0)
-
-            val_loss = val_loss / total
-            val_acc = correct / total
-
-            history["train_loss"].append(train_loss)
-            history["val_loss"].append(val_loss)
-            history["train_acc"].append(train_acc)
-            history["val_acc"].append(val_acc)
-
-            # Logging
-            append_csv_log(log_file, 'CNN', epoch+1, train_loss, val_loss, train_acc, val_acc)
-
-            # Reporting to Optuna
-            trial.report(val_acc, epoch)
-
-            # Handle pruning based on intermediate value
-            if trial.should_prune():
-                raise optuna.exceptions.TrialPruned()
-
-        return val_acc
-
-    # Create Optuna study
-    sampler = TPESampler(seed=42)
-    study = optuna.create_study(direction='maximize', sampler=sampler)
-    study.optimize(objective, n_trials=n_trials)
-
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial:")
-    trial = study.best_trial
-
-    print("  Value: ", trial.value)
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print(f"    {key}: {value}")
-
-    # Train the best model
-    best_hidden_units = trial.params['hidden_units']
-    best_dropout = trial.params['dropout']
-    best_learning_rate = trial.params['learning_rate']
-    best_num_epochs = trial.params['num_epochs']
-
-    best_model = CNNModel(hidden_units=best_hidden_units, dropout=best_dropout).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(best_model.parameters(), lr=best_learning_rate)
-
-    best_history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
-    best_val_acc_overall = 0.0
-
-    for epoch in range(best_num_epochs):
-        # Training Phase
-        best_model.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = best_model(images)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item() * images.size(0)
-            _, predicted = torch.max(outputs, 1)
-            correct += (predicted == labels).sum().item()
-            total += labels.size(0)
-
-        train_loss = running_loss / total
-        train_acc = correct / total
-
-        # Validation Phase
-        best_model.eval()
-        val_loss = 0.0
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = best_model(images)
-                loss = criterion(outputs, labels)
-
-                val_loss += loss.item() * images.size(0)
-                _, predicted = torch.max(outputs, 1)
-                correct += (predicted == labels).sum().item()
-                total += labels.size(0)
-
-        val_loss = val_loss / total
-        val_acc = correct / total
-
-        best_history["train_loss"].append(train_loss)
-        best_history["val_loss"].append(val_loss)
-        best_history["train_acc"].append(train_acc)
-        best_history["val_acc"].append(val_acc)
-
-        # Logging
-        append_csv_log(log_file, 'CNN', epoch+1, train_loss, val_loss, train_acc, val_acc)
-
-        # Save best model
-        if val_acc > best_val_acc_overall:
-            best_val_acc_overall = val_acc
-            torch.save(best_model.state_dict(), model_save_path)
-            print(f"Best model updated at epoch {epoch+1} with Val Acc: {val_acc:.4f}")
-
-    print(f"Best Validation Accuracy: {best_val_acc_overall:.4f}")
-    return best_model, trial.params, best_history, best_val_acc_overall
-
-
-
-
-
-def optimize_and_train_random_forest(X_train, y_train, X_val, y_val, log_file, model_save_path, n_trials=20):
-    """
-    Optimize hyperparameters and train the Random Forest model using Optuna.
-
-    Args:
-        X_train (numpy.ndarray): Training features.
-        y_train (numpy.ndarray): Training labels.
-        X_val (numpy.ndarray): Validation features.
-        y_val (numpy.ndarray): Validation labels.
-        log_file (str): Path to the CSV log file.
-        model_save_path (str): Path to save the best model.
-        n_trials (int): Number of Optuna trials for hyperparameter optimization.
-
-    Returns:
-        RandomForestClassifier: Best-trained Random Forest model.
-        dict: Best hyperparameters found by Optuna.
-    """
-    initialize_csv_log(log_file)
-
-    def objective(trial: Trial):
-        # Suggest hyperparameters
-        n_estimators = trial.suggest_int('n_estimators', 100, 1000)
-        max_depth = trial.suggest_int('max_depth', 5, 50)
-        min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
-        min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
-        max_features = trial.suggest_categorical('max_features', ['auto', 'sqrt', 'log2'])
-        class_weight = trial.suggest_categorical('class_weight', ['balanced', None])
-
-        # Initialize the model
-        rf = RandomForestClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            max_features=max_features,
-            class_weight=class_weight,
-            random_state=42,
-            n_jobs=-1
-        )
-
-        # Train the model
-        rf.fit(X_train, y_train)
-
-        # Validate the model
-        val_acc = rf.score(X_val, y_val)
-
-        # Report to Optuna
-        trial.report(val_acc, step=0)
-
-        # Handle pruning
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
-
-        return val_acc
-
-    # Create Optuna study
-    sampler = TPESampler(seed=42)
-    study = optuna.create_study(direction='maximize', sampler=sampler)
-    study.optimize(objective, n_trials=n_trials)
-
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial:")
-    trial = study.best_trial
-
-    print("  Value: ", trial.value)
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print(f"    {key}: {value}")
-
-    # Train the best model
-    best_params = trial.params
-    best_rf = RandomForestClassifier(
-        n_estimators=best_params['n_estimators'],
-        max_depth=best_params['max_depth'],
-        min_samples_split=best_params['min_samples_split'],
-        min_samples_leaf=best_params['min_samples_leaf'],
-        max_features=best_params['max_features'],
-        class_weight=best_params['class_weight'],
-        random_state=42,
-        n_jobs=-1
+    return (
+        (cnn_train_loader, cnn_val_loader, cnn_test_loader),
+        (rf_train_loader, rf_val_loader, rf_test_loader)
     )
 
-    best_rf.fit(X_train, y_train)
 
-    # Evaluate on validation set
-    val_acc = best_rf.score(X_val, y_val)
 
-    # Logging
-    append_csv_log(log_file, 'RandomForest', 1, None, None, None, val_acc)
+#Start Data Preparation for BreastMNIST
+def prepare_breastmnist_data(batch_size=32, download=True, data_dir="data_breast", n_components=50):
+    """
+    Prepare BreastMNIST dataset for both CNN and Random Forest.
 
-    # Save the best model
-    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
-    joblib.dump(best_rf, model_save_path)
-    print(f"Best Random Forest model saved to {model_save_path} with Val Acc: {val_acc:.4f}")
+    Steps:
+    1. Compute mean/std for normalization (on training data).
+    2. Define transform pipelines for CNN and RF.
+    3. Load datasets and create DataLoaders for CNN and RF.
+    4. Flatten features for RF.
+    5. Standardize and apply PCA for RF.
 
-    return best_rf, best_params
+    Args:
+        batch_size (int, optional): Batch size. Defaults to 32.
+        download (bool, optional): Download dataset if not present. Defaults to True.
+        data_dir (str, optional): Directory for storing/downloading data. Defaults to "data_breast".
+        n_components (int, optional): PCA components for Random Forest. Defaults to 50.
+
+    Returns:
+        tuple: 
+            - cnn_train_loader, cnn_val_loader, cnn_test_loader
+            - (X_train_rf_pca, y_train_rf), (X_val_rf_pca, y_val_rf), (X_test_rf_pca, y_test_rf)
+            - scaler (StandardScaler), pca (PCA)
+    """
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Step 1: Compute mean/std from initial transform (no augmentation)
+    temp_transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+    temp_dataset   = BreastMNIST(split='train', transform=temp_transform, download=download, root=data_dir)
+    temp_loader    = DataLoader(temp_dataset, batch_size=batch_size, shuffle=False)
+
+    mean, std = calculate_mean_std(temp_loader)
+    print(f"[BreastMNIST] Calculated Mean: {mean}, Std: {std}")
+
+    # Step 2: Get transform pipelines
+    # CNN
+    transform_train_cnn, transform_val_test_cnn = get_transforms_for_cnn(mean, std)
+    # RF
+    transform_train_rf, transform_val_test_rf   = get_transforms_for_rf(mean, std)
+
+    # Step 3: Load datasets and create loaders
+    (
+        cnn_train_loader, cnn_val_loader, cnn_test_loader,
+        rf_train_loader, rf_val_loader, rf_test_loader
+    ) = load_breastmnist_datasets(
+        batch_size=batch_size,
+        download=download,
+        data_dir=data_dir,
+        transform_train_cnn=transform_train_cnn,
+        transform_val_test_cnn=transform_val_test_cnn,
+        transform_train_rf=transform_train_rf,
+        transform_val_test_rf=transform_val_test_rf
+    )
+
+    # Step 4: Flatten features for RF
+    X_train_rf, y_train_rf = flatten_features(rf_train_loader)
+    X_val_rf,   y_val_rf   = flatten_features(rf_val_loader)
+    X_test_rf,  y_test_rf  = flatten_features(rf_test_loader)
+
+    # Step 5: Standardize and apply PCA
+    (X_train_rf_pca, X_val_rf_pca, X_test_rf_pca), scaler, pca = preprocess_for_rf(
+        X_train_rf, X_val_rf, X_test_rf, n_components
+    )
+
+    # Package RF datasets
+    rf_train_data = (X_train_rf_pca, y_train_rf)
+    rf_val_data   = (X_val_rf_pca,   y_val_rf)
+    rf_test_data  = (X_test_rf_pca,  y_test_rf)
+
+    return (
+        cnn_train_loader, cnn_val_loader, cnn_test_loader,
+        rf_train_data, rf_val_data, rf_test_data,
+        scaler, pca
+    )
+
+
+#--------------------------------- Task Specific Codes: Task B (Blood) ---------------------------------#
+
+#Load BloodMNIST Datasets with Corresponding Transformations
+def load_bloodmnist_datasets(
+    batch_size: int,
+    download: bool,
+    data_dir: str,
+    transform_train_cnn,
+    transform_val_test_cnn,
+    transform_train_rf,
+    transform_val_test_rf
+):
+    """
+    Load BloodMNIST datasets for both CNN and Random Forest with corresponding transformations.
+
+    Args:
+        batch_size (int): Number of samples per batch.
+        download (bool): Whether to download the dataset if not available.
+        data_dir (str): Directory where the dataset is stored or will be downloaded to.
+        transform_train_cnn (transforms.Compose): Training transform for CNN.
+        transform_val_test_cnn (transforms.Compose): Val/test transform for CNN.
+        transform_train_rf (transforms.Compose): Training transform for RF.
+        transform_val_test_rf (transforms.Compose): Val/test transform for RF.
+
+    Returns:
+        tuple: 
+            - (cnn_train_loader, cnn_val_loader, cnn_test_loader)
+            - (rf_train_loader, rf_val_loader, rf_test_loader)
+    """
+    # Load datasets for CNN
+    train_dataset_cnn = BloodMNIST(split='train', transform=transform_train_cnn, download=download, root=data_dir)
+    val_dataset_cnn   = BloodMNIST(split='val',   transform=transform_val_test_cnn, download=download, root=data_dir)
+    test_dataset_cnn  = BloodMNIST(split='test',  transform=transform_val_test_cnn, download=download, root=data_dir)
+
+    # Create DataLoaders for CNN
+    cnn_train_loader = DataLoader(train_dataset_cnn, batch_size=batch_size, shuffle=True)
+    cnn_val_loader   = DataLoader(val_dataset_cnn,   batch_size=batch_size, shuffle=False)
+    cnn_test_loader  = DataLoader(test_dataset_cnn,  batch_size=batch_size, shuffle=False)
+
+    # Load datasets for Random Forest
+    train_dataset_rf = BloodMNIST(split='train', transform=transform_train_rf, download=download, root=data_dir)
+    val_dataset_rf   = BloodMNIST(split='val',   transform=transform_val_test_rf, download=download, root=data_dir)
+    test_dataset_rf  = BloodMNIST(split='test',  transform=transform_val_test_rf, download=download, root=data_dir)
+
+    # Create DataLoaders for Random Forest (no shuffle needed)
+    rf_train_loader = DataLoader(train_dataset_rf, batch_size=batch_size, shuffle=False)
+    rf_val_loader   = DataLoader(val_dataset_rf,   batch_size=batch_size, shuffle=False)
+    rf_test_loader  = DataLoader(test_dataset_rf,  batch_size=batch_size, shuffle=False)
+
+    return (
+        (cnn_train_loader, cnn_val_loader, cnn_test_loader),
+        (rf_train_loader, rf_val_loader, rf_test_loader)
+    )
+
+#Start Data Preparation for BloodMNIST
+def prepare_bloodmnist_data(batch_size=32, download=True, data_dir="data_blood", n_components=50):
+    """
+    Prepare BloodMNIST dataset for both CNN and Random Forest.
+
+    Steps:
+    1. Compute mean/std for normalization (on training data).
+    2. Define transform pipelines for CNN and RF.
+    3. Load datasets and create DataLoaders for CNN and RF.
+    4. Flatten features for RF.
+    5. Standardize and apply PCA for RF.
+
+    Args:
+        batch_size (int, optional): Batch size. Defaults to 32.
+        download (bool, optional): Download dataset if not present. Defaults to True.
+        data_dir (str, optional): Directory for storing/downloading data. Defaults to "data_blood".
+        n_components (int, optional): PCA components for Random Forest. Defaults to 50.
+
+    Returns:
+        tuple: 
+            - cnn_train_loader, cnn_val_loader, cnn_test_loader
+            - (X_train_rf_pca, y_train_rf), (X_val_rf_pca, y_val_rf), (X_test_rf_pca, y_test_rf)
+            - scaler (StandardScaler), pca (PCA)
+    """
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Step 1: Compute mean/std from initial transform
+    temp_transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+    temp_dataset = BloodMNIST(split='train', transform=temp_transform, download=download, root=data_dir)
+    temp_loader  = DataLoader(temp_dataset, batch_size=batch_size, shuffle=False)
+
+    mean, std = calculate_mean_std(temp_loader)
+    print(f"[BloodMNIST] Calculated Mean: {mean}, Std: {std}")
+
+    # Step 2: Define transform pipelines
+    # CNN
+    transform_train_cnn, transform_val_test_cnn = get_transforms_for_cnn(mean, std)
+    # RF
+    transform_train_rf, transform_val_test_rf   = get_transforms_for_rf(mean, std)
+
+    # Step 3: Load datasets and create loaders
+    (
+        cnn_train_loader, cnn_val_loader, cnn_test_loader,
+        rf_train_loader, rf_val_loader, rf_test_loader
+    ) = load_bloodmnist_datasets(
+        batch_size=batch_size,
+        download=download,
+        data_dir=data_dir,
+        transform_train_cnn=transform_train_cnn,
+        transform_val_test_cnn=transform_val_test_cnn,
+        transform_train_rf=transform_train_rf,
+        transform_val_test_rf=transform_val_test_rf
+    )
+
+    # Step 4: Flatten features for RF
+    X_train_rf, y_train_rf = flatten_features(rf_train_loader)
+    X_val_rf,   y_val_rf   = flatten_features(rf_val_loader)
+    X_test_rf,  y_test_rf  = flatten_features(rf_test_loader)
+
+    # Step 5: Standardize and apply PCA
+    (X_train_rf_pca, X_val_rf_pca, X_test_rf_pca), scaler, pca = preprocess_for_rf(
+        X_train_rf, X_val_rf, X_test_rf, n_components
+    )
+
+    # Package RF datasets
+    rf_train_data = (X_train_rf_pca, y_train_rf)
+    rf_val_data   = (X_val_rf_pca,   y_val_rf)
+    rf_test_data  = (X_test_rf_pca,  y_test_rf)
+
+    return (
+        cnn_train_loader, cnn_val_loader, cnn_test_loader,
+        rf_train_data, rf_val_data, rf_test_data,
+        scaler, pca
+    )
+
