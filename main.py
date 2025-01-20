@@ -550,7 +550,7 @@ if __name__ == "__main__":
     prepared_data = prepare_breastmnist_data(
         batch_size=BATCH_SIZE,
         download=DOWNLOAD,
-        data_dir="data_breast",
+        data_dir="./Datasets/BreastMNIST",
         n_components=N_COMPONENTS
     )
 
