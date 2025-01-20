@@ -190,9 +190,14 @@ def preprocess_for_rf(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
 
 
 
+
+
+
+
+
+
+
 #--------------------------------- Task Specific Codes: Task A (Breast) ---------------------------------#
-
-
 
 #Load BreastMNIST Datasets with Corresponding Transformations
 def load_breastmnist_datasets(
@@ -248,6 +253,15 @@ def load_breastmnist_datasets(
 
 
 
+
+
+
+
+
+
+
+
+
 #Start Data Preparation for BreastMNIST
 def prepare_breastmnist_data(batch_size=32, download=True, data_dir="data_breast", n_components=50):
     """
@@ -291,10 +305,7 @@ def prepare_breastmnist_data(batch_size=32, download=True, data_dir="data_breast
     transform_train_rf, transform_val_test_rf   = get_transforms_for_rf(mean, std)
 
     # Step 3: Load datasets and create loaders
-    (
-        cnn_train_loader, cnn_val_loader, cnn_test_loader,
-        rf_train_loader, rf_val_loader, rf_test_loader
-    ) = load_breastmnist_datasets(
+    cnn_loaders, rf_loaders = load_breastmnist_datasets(
         batch_size=batch_size,
         download=download,
         data_dir=data_dir,
@@ -303,6 +314,10 @@ def prepare_breastmnist_data(batch_size=32, download=True, data_dir="data_breast
         transform_train_rf=transform_train_rf,
         transform_val_test_rf=transform_val_test_rf
     )
+
+    # Further unpack each tuple into individual loaders
+    cnn_train_loader, cnn_val_loader, cnn_test_loader = cnn_loaders
+    rf_train_loader, rf_val_loader, rf_test_loader = rf_loaders
 
     # Step 4: Flatten features for RF
     X_train_rf, y_train_rf = flatten_features(rf_train_loader)
@@ -319,11 +334,28 @@ def prepare_breastmnist_data(batch_size=32, download=True, data_dir="data_breast
     rf_val_data   = (X_val_rf_pca,   y_val_rf)
     rf_test_data  = (X_test_rf_pca,  y_test_rf)
 
-    return (
-        cnn_train_loader, cnn_val_loader, cnn_test_loader,
-        rf_train_data, rf_val_data, rf_test_data,
-        scaler, pca
-    )
+    return {
+        "cnn_train_loader": cnn_train_loader,
+        "cnn_val_loader": cnn_val_loader,
+        "cnn_test_loader": cnn_test_loader,
+        "rf_train_data": rf_train_data,
+        "rf_val_data": rf_val_data,
+        "rf_test_data": rf_test_data,
+        "scaler": scaler,
+        "pca": pca
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #--------------------------------- Task Specific Codes: Task B (Blood) ---------------------------------#
@@ -380,6 +412,21 @@ def load_bloodmnist_datasets(
         (rf_train_loader, rf_val_loader, rf_test_loader)
     )
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #Start Data Preparation for BloodMNIST
 def prepare_bloodmnist_data(batch_size=32, download=True, data_dir="data_blood", n_components=50):
     """
@@ -423,10 +470,7 @@ def prepare_bloodmnist_data(batch_size=32, download=True, data_dir="data_blood",
     transform_train_rf, transform_val_test_rf   = get_transforms_for_rf(mean, std)
 
     # Step 3: Load datasets and create loaders
-    (
-        cnn_train_loader, cnn_val_loader, cnn_test_loader,
-        rf_train_loader, rf_val_loader, rf_test_loader
-    ) = load_bloodmnist_datasets(
+    cnn_loaders, rf_loaders = load_bloodmnist_datasets(
         batch_size=batch_size,
         download=download,
         data_dir=data_dir,
@@ -435,6 +479,10 @@ def prepare_bloodmnist_data(batch_size=32, download=True, data_dir="data_blood",
         transform_train_rf=transform_train_rf,
         transform_val_test_rf=transform_val_test_rf
     )
+
+    # Further unpack each tuple into individual loaders
+    cnn_train_loader, cnn_val_loader, cnn_test_loader = cnn_loaders
+    rf_train_loader, rf_val_loader, rf_test_loader = rf_loaders
 
     # Step 4: Flatten features for RF
     X_train_rf, y_train_rf = flatten_features(rf_train_loader)
@@ -451,9 +499,130 @@ def prepare_bloodmnist_data(batch_size=32, download=True, data_dir="data_blood",
     rf_val_data   = (X_val_rf_pca,   y_val_rf)
     rf_test_data  = (X_test_rf_pca,  y_test_rf)
 
-    return (
-        cnn_train_loader, cnn_val_loader, cnn_test_loader,
-        rf_train_data, rf_val_data, rf_test_data,
-        scaler, pca
+    return {
+        "cnn_train_loader": cnn_train_loader,
+        "cnn_val_loader": cnn_val_loader,
+        "cnn_test_loader": cnn_test_loader,
+        "rf_train_data": rf_train_data,
+        "rf_val_data": rf_val_data,
+        "rf_test_data": rf_test_data,
+        "scaler": scaler,
+        "pca": pca
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    # Parameters
+    BATCH_SIZE = 32
+    DOWNLOAD = True
+    N_COMPONENTS = 50  # Number of PCA components for Random Forest
+
+    # ---------------------------------------
+    # Preparing BreastMNIST Data (Task A)
+    # ---------------------------------------
+    print("--- Preparing BreastMNIST Data (Task A) ---")
+    prepared_data = prepare_breastmnist_data(
+        batch_size=BATCH_SIZE,
+        download=DOWNLOAD,
+        data_dir="data_breast",
+        n_components=N_COMPONENTS
     )
 
+    # ---------------------------------------
+    # Inspect BreastMNIST CNN Training Data
+    # ---------------------------------------
+    print("\nBreastMNIST CNN Training Data:")
+    cnn_train_loader = prepared_data["cnn_train_loader"]
+    for i, (data, targets) in enumerate(cnn_train_loader):
+        print(f"Batch {i+1}:")
+        print(f" - Data shape: {data.shape}")        # Expected: [batch_size, channels, height, width]
+        print(f" - Targets shape: {targets.shape}")  # Expected: [batch_size]
+        break  # Remove this break to iterate through all batches
+
+    # ---------------------------------------
+    # Inspect BreastMNIST RF Training Data
+    # ---------------------------------------
+    print("\nBreastMNIST RF Training Data:")
+    X_train_rf_pca, y_train_rf = prepared_data["rf_train_data"]
+    print(f" - X_train_rf_pca shape: {X_train_rf_pca.shape}")  # Expected: [num_samples, n_components]
+    print(f" - y_train_rf shape: {y_train_rf.shape}")            # Expected: [num_samples]
+
+    # ---------------------------------------
+    # Inspect BreastMNIST CNN Validation Data
+    # ---------------------------------------
+    print("\nBreastMNIST CNN Validation Data:")
+    cnn_val_loader = prepared_data["cnn_val_loader"]
+    for i, (data, targets) in enumerate(cnn_val_loader):
+        print(f"Batch {i+1}:")
+        print(f" - Data shape: {data.shape}")
+        print(f" - Targets shape: {targets.shape}")
+        break  # Remove this break to iterate through all batches
+
+    # ---------------------------------------
+    # Inspect BreastMNIST RF Validation Data
+    # ---------------------------------------
+    print("\nBreastMNIST RF Validation Data:")
+    X_val_rf_pca, y_val_rf = prepared_data["rf_val_data"]
+    print(f" - X_val_rf_pca shape: {X_val_rf_pca.shape}")
+    print(f" - y_val_rf shape: {y_val_rf.shape}")
+
+    # ---------------------------------------
+    # Inspect BreastMNIST CNN Test Data
+    # ---------------------------------------
+    print("\nBreastMNIST CNN Test Data:")
+    cnn_test_loader = prepared_data["cnn_test_loader"]
+    for i, (data, targets) in enumerate(cnn_test_loader):
+        print(f"Batch {i+1}:")
+        print(f" - Data shape: {data.shape}")
+        print(f" - Targets shape: {targets.shape}")
+        break  # Remove this break to iterate through all batches
+
+    # ---------------------------------------
+    # Inspect BreastMNIST RF Test Data
+    # ---------------------------------------
+    print("\nBreastMNIST RF Test Data:")
+    X_test_rf_pca, y_test_rf = prepared_data["rf_test_data"]
+    print(f" - X_test_rf_pca shape: {X_test_rf_pca.shape}")
+    print(f" - y_test_rf shape: {y_test_rf.shape}")
+
+    # ---------------------------------------
+    # (Optional) Proceed with Model Training and Evaluation
+    # ---------------------------------------
+    # At this point, you can proceed to define, train, and evaluate your CNN and Random Forest models.
+    # This section is intentionally left as a placeholder for your specific implementation.
+
+    # Example Placeholder:
+    # cnn_model = YourCNNModel()
+    # train_cnn(cnn_model, prepared_data["cnn_train_loader"], ...)
+    # evaluate_cnn(cnn_model, prepared_data["cnn_val_loader"], ...)
+    #
+    # rf_model = RandomForestClassifier(n_estimators=100, ...)
+    # rf_model.fit(X_train_rf_pca, y_train_rf)
+    # y_pred_rf = rf_model.predict(X_val_rf_pca)
+    # print(classification_report(y_val_rf, y_pred_rf))
+
+    print("\nData preparation and inspection completed successfully.")
