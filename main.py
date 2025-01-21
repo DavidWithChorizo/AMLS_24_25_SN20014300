@@ -14,8 +14,9 @@ from timeit import default_timer as timer
 import joblib
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split,GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import optuna
 from optuna import Trial
@@ -24,6 +25,8 @@ import csv
 import datetime
 from medmnist import BreastMNIST, BloodMNIST
 from sklearn.feature_selection import RFE
+import logging
+from sklearn.model_selection import StratifiedKFold
 
 #------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -427,81 +430,6 @@ def prepare_bloodmnist_data(
     }
 
 
-#--------------------------------- Main Execution ---------------------------------#
-
-if __name__ == "__main__":
-    # 1. Task A: Using a Decision Tree on BreastMNIST
-    #    With custom scaling, optional PCA, optional RFE
-    BATCH_SIZE = 32
-    DOWNLOAD = True
-
-    # Let's do: scale, 10 PCA components, and no RFE for demonstration
-    print("--- Preparing BreastMNIST for Decision Tree (Task A) ---")
-    breast_tree_data = prepare_breastmnist_data(
-        batch_size=BATCH_SIZE,
-        download=DOWNLOAD,
-        data_dir="./Datasets/BreastMNIST",
-        n_components=10,             # Use PCA=10 for demonstration
-        apply_feature_selection=False,# or True if you want RFE
-        n_features=10                # RFE param if apply_feature_selection is True
-    )
-
-    X_train_dt = breast_tree_data["X_train"]
-    y_train_dt = breast_tree_data["y_train"]
-    X_val_dt   = breast_tree_data["X_val"]
-    y_val_dt   = breast_tree_data["y_val"]
-    X_test_dt  = breast_tree_data["X_test"]
-    y_test_dt  = breast_tree_data["y_test"]
-
-    print("\n[Check shapes for Decision Tree usage on BreastMNIST]")
-    print(" - X_train_dt:", X_train_dt.shape)
-    print(" - y_train_dt:", y_train_dt.shape)
-    print(" - X_val_dt:", X_val_dt.shape)
-    print(" - y_val_dt:", y_val_dt.shape)
-    print(" - X_test_dt:", X_test_dt.shape)
-    print(" - y_test_dt:", y_test_dt.shape)
-
-    # Example: Train a Decision Tree
-    from sklearn.tree import DecisionTreeClassifier
-    dt_model = DecisionTreeClassifier(random_state=42)
-    dt_model.fit(X_train_dt, y_train_dt)
-    y_val_pred = dt_model.predict(X_val_dt)
-
-    from sklearn.metrics import classification_report
-    print("\nDecision Tree (Task A) Validation Results:")
-    print(classification_report(y_val_dt, y_val_pred))
-
-    # 2. Task B: Using BloodMNIST with CNN + Flattened approach for RandomForest
-    print("\n--- Preparing BloodMNIST for CNN + RandomForest (Task B) ---")
-    from sklearn.ensemble import RandomForestClassifier
-
-    blood_data = prepare_bloodmnist_data(
-        batch_size=32,
-        download=DOWNLOAD,
-        data_dir="./Datasets/BloodMNIST",
-        n_components=50  # PCA with 50 comps
-    )
-
-    # Check shapes for CNN + RF
-    print("\n[BloodMNIST Data Check]")
-    cnn_train_loader_b = blood_data["cnn_train_loader"]
-    X_train_rf_b, y_train_rf_b = blood_data["rf_train_data"]
-    X_val_rf_b,   y_val_rf_b   = blood_data["rf_val_data"]
-
-    print(" - X_train_rf_b:", X_train_rf_b.shape)
-    print(" - y_train_rf_b:", y_train_rf_b.shape)
-
-    # Quick example: train a random forest
-    rf_b_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf_b_model.fit(X_train_rf_b, y_train_rf_b)
-    y_val_pred_b = rf_b_model.predict(X_val_rf_b)
-
-    print("\nRandomForest on BloodMNIST (Validation Results):")
-    print(classification_report(y_val_rf_b, y_val_pred_b))
-
-    # (Optional) For CNN, you'd define & train your CNN using cnn_train_loader_b
-    print("\nDone with data prep for Task A (Decision Tree) and Task B (CNN + RF).")
-
 
 #------------------------------------------------------------------- End of Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -531,19 +459,13 @@ def setup_logging(log_file='training.log'):
 
 
 #--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
-
 def tune_decision_tree(X_train, y_train, logger=None):
     """
     Hyperparameter tuning for Decision Tree using GridSearchCV.
-    
-    Args:
-        X_train (np.ndarray): Training features.
-        y_train (np.ndarray): Training labels.
-        logger (logging.Logger, optional): Logger object for logging. Defaults to None.
-    
-    Returns:
-        GridSearchCV: Fitted GridSearchCV object.
     """
+    # Ensure y_train is 1D
+    y_train = y_train.ravel()
+    
     dt = DecisionTreeClassifier(random_state=42)
     param_grid = {
         'max_depth': [None, 10, 20, 30, 40, 50],
@@ -552,9 +474,11 @@ def tune_decision_tree(X_train, y_train, logger=None):
         'criterion': ['gini', 'entropy']
     }
     
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
     grid_search = GridSearchCV(estimator=dt, param_grid=param_grid, 
-                               cv=5, n_jobs=-1, scoring='f1', verbose=1)
-    grid_search.fit(X_train, y_train)
+                               cv=skf, n_jobs=-1, scoring='f1', verbose=1)
+    grid_search.fit(X_train, y_train)  # y_train is now 1D
     
     if logger:
         logger.info("Decision Tree Hyperparameter Tuning Completed.")
@@ -567,19 +491,13 @@ def tune_decision_tree(X_train, y_train, logger=None):
     
     return grid_search
 
-
 def tune_random_forest(X_train, y_train, logger=None):
     """
     Hyperparameter tuning for Random Forest using GridSearchCV.
-    
-    Args:
-        X_train (np.ndarray): Training features.
-        y_train (np.ndarray): Training labels.
-        logger (logging.Logger, optional): Logger object for logging. Defaults to None.
-    
-    Returns:
-        GridSearchCV: Fitted GridSearchCV object.
     """
+    # Ensure y_train is 1D
+    y_train = y_train.ravel()
+    
     rf = RandomForestClassifier(random_state=42)
     param_grid = {
         'n_estimators': [100, 200, 300],
@@ -590,9 +508,11 @@ def tune_random_forest(X_train, y_train, logger=None):
         'criterion': ['gini', 'entropy']
     }
     
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
     grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, 
-                               cv=5, n_jobs=-1, scoring='f1_weighted', verbose=1)
-    grid_search.fit(X_train, y_train)
+                               cv=skf, n_jobs=-1, scoring='f1_weighted', verbose=1)
+    grid_search.fit(X_train, y_train)  # y_train is now 1D
     
     if logger:
         logger.info("Random Forest Hyperparameter Tuning Completed.")
@@ -604,3 +524,117 @@ def tune_random_forest(X_train, y_train, logger=None):
         print("Best F1-Score:", grid_search.best_score_)
     
     return grid_search
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#--------------------------------- MAIN FUNCTION ---------------------------------#
+def main():
+    """
+    Main function focusing on Task A: Decision Tree with BreastMNIST.
+    1. Prepare data
+    2. Tune Decision Tree hyperparameters
+    3. Evaluate on validation & test
+    4. Save the trained model (and scaler/PCA) to ./A/
+    """
+    import os
+    import joblib
+    from sklearn.metrics import classification_report
+    
+    # Setup logging
+    logger = setup_logging('training_taskA.log')
+    logger.info("Starting Task A: BreastMNIST + Decision Tree.")
+    
+    # Step 1: Prepare data for Decision Tree
+    print("\n--- Preparing BreastMNIST for Decision Tree (Task A) ---")
+    data_dict = prepare_breastmnist_data(
+        batch_size=32,
+        download=True,
+        data_dir="./Datasets/BreastMNIST",
+        n_components=10,              # set to 0 to skip PCA
+        apply_feature_selection=False, # True if you want RFE
+        n_features=10                 # number of features if RFE is applied
+    )
+    
+    X_train_dt = data_dict["X_train"]
+    y_train_dt = data_dict["y_train"]
+    X_val_dt   = data_dict["X_val"]
+    y_val_dt   = data_dict["y_val"]
+    X_test_dt  = data_dict["X_test"]
+    y_test_dt  = data_dict["y_test"]
+    
+    # Confirm shapes
+    print("\n[Check shapes for Decision Tree usage on BreastMNIST]")
+    print(" - X_train_dt:", X_train_dt.shape)
+    print(" - y_train_dt:", y_train_dt.shape)
+    print(" - X_val_dt:", X_val_dt.shape)
+    print(" - y_val_dt:", y_val_dt.shape)
+    print(" - X_test_dt:", X_test_dt.shape)
+    print(" - y_test_dt:", y_test_dt.shape)
+    
+    # Step 2: Hyperparameter Tuning
+    logger.info("Starting Decision Tree Hyperparameter Tuning.")
+    dt_grid_search = tune_decision_tree(X_train_dt, y_train_dt, logger=logger)
+    
+    # Retrieve best Decision Tree
+    best_dt = dt_grid_search.best_estimator_
+    # Optionally set class_weight to handle imbalance
+    best_dt.set_params(class_weight='balanced')
+    
+    # Retrain best Decision Tree on the entire training set
+    best_dt.fit(X_train_dt, y_train_dt)
+    
+    # Step 3: Evaluate on Validation & Test
+    print("\nDecision Tree (Task A) Validation Results:")
+    y_val_pred_dt = best_dt.predict(X_val_dt)
+    val_report = classification_report(y_val_dt, y_val_pred_dt)
+    print(val_report)
+    logger.info("Decision Tree (Task A) Validation Report:")
+    logger.info(val_report)
+    
+    print("\nDecision Tree (Task A) Test Results:")
+    y_test_pred_dt = best_dt.predict(X_test_dt)
+    test_report = classification_report(y_test_dt, y_test_pred_dt)
+    print(test_report)
+    logger.info("Decision Tree (Task A) Test Report:")
+    logger.info(test_report)
+    
+    # Step 4: Save the Trained Model + Preprocessing
+    os.makedirs("./A", exist_ok=True)
+    
+    dt_model_path = "./A/best_decision_tree.joblib"
+    joblib.dump(best_dt, dt_model_path)
+    logger.info(f"Saved Decision Tree model to {dt_model_path}.")
+    
+    scaler_path = "./A/breast_scaler.joblib"
+    joblib.dump(data_dict["scaler"], scaler_path)
+    logger.info(f"Saved BreastMNIST scaler to {scaler_path}.")
+    
+    if data_dict["pca"] is not None:
+        pca_path = "./A/breast_pca.joblib"
+        joblib.dump(data_dict["pca"], pca_path)
+        logger.info(f"Saved BreastMNIST PCA to {pca_path}.")
+    
+    logger.info("Completed Task A: BreastMNIST + Decision Tree.\n")
+    print("\nData preparation, hyperparameter tuning, and evaluation for Task A completed successfully.")
+
+# Uncomment this if you want to auto-run the main when you do `python main.py`
+if __name__ == "__main__":
+     main()
