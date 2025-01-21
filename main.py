@@ -503,3 +503,104 @@ if __name__ == "__main__":
     print("\nDone with data prep for Task A (Decision Tree) and Task B (CNN + RF).")
 
 
+#------------------------------------------------------------------- End of Dataset Preparation Codes -------------------------------------------------------------------#
+
+
+
+#--------------------------------- Training and Evaluation Codes ---------------------------------#
+
+#--------------------------------- Logging Setup ---------------------------------#
+
+def setup_logging(log_file='training.log'):
+    """
+    Set up logging configuration.
+    
+    Args:
+        log_file (str): Path to the log file.
+    
+    Returns:
+        Logger object.
+    """
+    logging.basicConfig(
+        filename=log_file,
+        filemode='a',
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    return logging.getLogger()
+
+
+#--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
+
+def tune_decision_tree(X_train, y_train, logger=None):
+    """
+    Hyperparameter tuning for Decision Tree using GridSearchCV.
+    
+    Args:
+        X_train (np.ndarray): Training features.
+        y_train (np.ndarray): Training labels.
+        logger (logging.Logger, optional): Logger object for logging. Defaults to None.
+    
+    Returns:
+        GridSearchCV: Fitted GridSearchCV object.
+    """
+    dt = DecisionTreeClassifier(random_state=42)
+    param_grid = {
+        'max_depth': [None, 10, 20, 30, 40, 50],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'criterion': ['gini', 'entropy']
+    }
+    
+    grid_search = GridSearchCV(estimator=dt, param_grid=param_grid, 
+                               cv=5, n_jobs=-1, scoring='f1', verbose=1)
+    grid_search.fit(X_train, y_train)
+    
+    if logger:
+        logger.info("Decision Tree Hyperparameter Tuning Completed.")
+        logger.info(f"Best Parameters: {grid_search.best_params_}")
+        logger.info(f"Best F1-Score: {grid_search.best_score_}")
+    else:
+        print("Decision Tree Hyperparameter Tuning Completed.")
+        print("Best Parameters:", grid_search.best_params_)
+        print("Best F1-Score:", grid_search.best_score_)
+    
+    return grid_search
+
+
+def tune_random_forest(X_train, y_train, logger=None):
+    """
+    Hyperparameter tuning for Random Forest using GridSearchCV.
+    
+    Args:
+        X_train (np.ndarray): Training features.
+        y_train (np.ndarray): Training labels.
+        logger (logging.Logger, optional): Logger object for logging. Defaults to None.
+    
+    Returns:
+        GridSearchCV: Fitted GridSearchCV object.
+    """
+    rf = RandomForestClassifier(random_state=42)
+    param_grid = {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [None, 10, 20, 30],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'bootstrap': [True, False],
+        'criterion': ['gini', 'entropy']
+    }
+    
+    grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, 
+                               cv=5, n_jobs=-1, scoring='f1_weighted', verbose=1)
+    grid_search.fit(X_train, y_train)
+    
+    if logger:
+        logger.info("Random Forest Hyperparameter Tuning Completed.")
+        logger.info(f"Best Parameters: {grid_search.best_params_}")
+        logger.info(f"Best F1-Score: {grid_search.best_score_}")
+    else:
+        print("Random Forest Hyperparameter Tuning Completed.")
+        print("Best Parameters:", grid_search.best_params_)
+        print("Best F1-Score:", grid_search.best_score_)
+    
+    return grid_search
