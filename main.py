@@ -14,10 +14,10 @@ from timeit import default_timer as timer
 import joblib
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split,GridSearchCV
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, cross_val_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, f1_score, make_scorer
 import optuna
 from optuna import Trial
 from optuna.samplers import TPESampler
@@ -26,12 +26,35 @@ import datetime
 from medmnist import BreastMNIST, BloodMNIST
 from sklearn.feature_selection import RFE
 import logging
-from sklearn.model_selection import StratifiedKFold
 from imblearn.over_sampling import SMOTE
-import optuna
-from sklearn.model_selection import cross_val_score, StratifiedKFold
+import os
+import numpy as np
+from pathlib import Path
+from PIL import Image
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+from timeit import default_timer as timer
+import joblib
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import f1_score, make_scorer
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, f1_score, make_scorer
+import optuna
+from optuna import Trial
+from optuna.samplers import TPESampler
+import csv
+import datetime
+from medmnist import BloodMNIST
+from sklearn.feature_selection import RFE
+import logging
+from imblearn.over_sampling import SMOTE
 
 #------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -129,8 +152,7 @@ def feature_selection_rf(X_train_pca: np.ndarray, y_train: np.ndarray,
                          X_val_pca: np.ndarray, n_features=30):
     """
     Apply Recursive Feature Elimination (RFE) using a RandomForest as the estimator.
-    Even if you end up training a Decision Tree, 
-    we can use RF for feature ranking as it's often more stable than a single tree.
+    This is used to select the top 'n_features' based on feature importance.
 
     Args:
         X_train_pca (np.ndarray): Training features after scaling/PCA.
@@ -288,6 +310,13 @@ def prepare_breastmnist_data(
         X_val_processed   = X_val_fs
         print(f"Applied RFE with top {n_features} features for Decision Tree usage.")
 
+    # Step 7. (Optional) Apply SMOTE
+    if apply_smote:
+        smote = SMOTE(random_state=42)
+        X_train_processed, y_train = smote.fit_resample(X_train_processed, y_train)
+        print("Applied SMOTE for oversampling the minority class.")
+        print("New shape after SMOTE:", X_train_processed.shape, y_train.shape)
+
     return {
         "X_train": X_train_processed,
         "y_train": y_train,
@@ -313,12 +342,23 @@ def load_bloodmnist_datasets(
     transform_val_test_rf
 ):
     """
-    Load BloodMNIST for CNN and flatten-based approach simultaneously.
-    This remains as originally coded: 
-      - CNN transforms for the CNN path
-      - 'RF' transforms for random forest or other classical ML
+    Load BloodMNIST datasets specifically for both CNN and Random Forest pipelines.
+
+    Args:
+        batch_size (int): Number of samples per batch.
+        download (bool): Whether to download the data if not found.
+        data_dir (str): Directory to store/read data.
+        transform_train_cnn (transforms.Compose): Transform for CNN training set.
+        transform_val_test_cnn (transforms.Compose): Transform for CNN validation/test sets.
+        transform_train_rf (transforms.Compose): Transform for RF training set.
+        transform_val_test_rf (transforms.Compose): Transform for RF validation/test sets.
+
+    Returns:
+        tuple: (
+            (cnn_train_loader, cnn_val_loader, cnn_test_loader),
+            (rf_train_loader, rf_val_loader, rf_test_loader)
+        )
     """
-    from torch.utils.data import DataLoader
     train_dataset_cnn = BloodMNIST(split='train', transform=transform_train_cnn, download=download, root=data_dir)
     val_dataset_cnn   = BloodMNIST(split='val', transform=transform_val_test_cnn, download=download, root=data_dir)
     test_dataset_cnn  = BloodMNIST(split='test', transform=transform_val_test_cnn, download=download, root=data_dir)
@@ -343,7 +383,16 @@ def load_bloodmnist_datasets(
 
 def get_transforms_for_cnn(mean: list, std: list):
     """
-    For Task B: transform pipeline for CNN training, includes data augmentation for train set.
+    Define transformation pipeline for CNN training, including data augmentation.
+
+    Args:
+        mean (list): Mean values for normalization.
+        std (list): Standard deviation values for normalization.
+
+    Returns:
+        tuple:
+            - transform_train (transforms.Compose): Transformations for CNN training set.
+            - transform_val_test (transforms.Compose): Transformations for CNN validation/test sets.
     """
     transform_train = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.5),
@@ -362,8 +411,16 @@ def get_transforms_for_cnn(mean: list, std: list):
 
 def get_transforms_for_rf(mean: list, std: list):
     """
-    Minimal transforms for the RF path in BloodMNIST.
-    We'll do actual scaling in code anyway.
+    Define minimal transformation pipeline for Random Forest, as scaling is handled separately.
+
+    Args:
+        mean (list): Mean values for normalization.
+        std (list): Standard deviation values for normalization.
+
+    Returns:
+        tuple:
+            - transform_train (transforms.Compose): Transformations for RF training set.
+            - transform_val_test (transforms.Compose): Transformations for RF validation/test sets.
     """
     transform_train = transforms.Compose([
         transforms.ToTensor(),
@@ -380,34 +437,56 @@ def prepare_bloodmnist_data(
     batch_size=32, 
     download=True, 
     data_dir="data_blood", 
-    n_components=50
+    n_components=50,
+    apply_feature_selection=False,
+    n_features=30,
+    apply_smote=False
 ):
     """
-    Task B: Prepare BloodMNIST for:
-      - CNN usage
-      - Flatten + scale + (optional) PCA for a random forest or any classical ML
+    Prepare BloodMNIST data for both CNN and Random Forest pipelines.
+    Includes optional PCA, RFE, and SMOTE oversampling.
 
     Steps:
-    1. Mean/std
-    2. CNN transforms
-    3. Flatten
-    4. Standardize + PCA
+    1. Compute dataset mean/std for normalization.
+    2. Define transformation pipelines for CNN and RF.
+    3. Load train/val/test data for both CNN and RF.
+    4. Flatten RF data.
+    5. Scale + optional PCA.
+    6. Optional RFE.
+    7. Optional SMOTE.
+
+    Args:
+        batch_size (int): Batch size for DataLoaders.
+        download (bool): Whether to download the data if not present.
+        data_dir (str): Directory path for storing data.
+        n_components (int): Number of PCA components. If 0, PCA is skipped.
+        apply_feature_selection (bool): Whether to apply RFE.
+        n_features (int): Number of features to keep if RFE is applied.
+        apply_smote (bool): If True, apply SMOTE to the RF training set.
+
+    Returns:
+        dict: {
+            "cnn_train_loader", "cnn_val_loader", "cnn_test_loader",
+            "rf_train_data", "rf_val_data", "rf_test_data",
+            "scaler", "pca", "selector"
+        }
     """
     os.makedirs(data_dir, exist_ok=True)
 
-    from torch.utils.data import DataLoader
-    temp_transform = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    temp_dataset = BloodMNIST(split='train', transform=temp_transform, download=download, root=data_dir)
-    temp_loader  = DataLoader(temp_dataset, batch_size=batch_size, shuffle=False)
-
+    # 1. Calculate mean/std from the training dataset (simple transform)
+    temp_transform = transforms.Compose([transforms.ToTensor()])
+    temp_loader = DataLoader(
+        BloodMNIST(split='train', transform=temp_transform, download=download, root=data_dir),
+        batch_size=batch_size, shuffle=False
+    )
     mean, std = calculate_mean_std(temp_loader)
     print(f"[BloodMNIST] Calculated Mean: {mean}, Std: {std}")
 
+    # 2. Define transformation pipelines
     transform_train_cnn, transform_val_test_cnn = get_transforms_for_cnn(mean, std)
-    transform_train_rf,  transform_val_test_rf  = get_transforms_for_rf(mean, std)
+    transform_train_rf, transform_val_test_rf = get_transforms_for_rf(mean, std)
 
+    # 3. Load datasets for both CNN and RF
     cnn_loaders, rf_loaders = load_bloodmnist_datasets(
         batch_size=batch_size,
         download=download,
@@ -419,16 +498,40 @@ def prepare_bloodmnist_data(
     )
 
     cnn_train_loader, cnn_val_loader, cnn_test_loader = cnn_loaders
-    rf_train_loader, rf_val_loader, rf_test_loader    = rf_loaders
+    rf_train_loader, rf_val_loader, rf_test_loader = rf_loaders
 
+    # 4. Flatten RF data
     X_train_rf, y_train_rf = flatten_features(rf_train_loader)
-    X_val_rf,   y_val_rf   = flatten_features(rf_val_loader)
-    X_test_rf,  y_test_rf  = flatten_features(rf_test_loader)
+    X_val_rf, y_val_rf = flatten_features(rf_val_loader)
+    X_test_rf, y_test_rf = flatten_features(rf_test_loader)
 
-    # Apply scaling + PCA
+    # 5. Scale + optional PCA
     (X_train_pca, X_val_pca, X_test_pca), scaler, pca = preprocess_for_rf(
-        X_train_rf, X_val_rf, X_test_rf, n_components
+        X_train_rf, X_val_rf, X_test_rf, n_components=n_components
     )
+
+    # 6. Optional RFE
+    selector = None
+    if apply_feature_selection:
+        X_train_fs, X_val_fs, selector = feature_selection_rf(
+            X_train_pca, y_train_rf, 
+            X_val_pca, 
+            n_features=n_features
+        )
+        X_train_pca = X_train_fs
+        X_val_pca = X_val_fs
+        print(f"Applied RFE with top {n_features} features for Random Forest usage.")
+
+        # Apply RFE to Test Set if selector is available
+        if selector is not None:
+            X_test_pca = selector.transform(X_test_pca)
+            print("Applied RFE transform to the test set.")
+
+    # 7. Optional SMOTE on RF Training Set
+    if apply_smote:
+        smote = SMOTE(random_state=42)
+        X_train_pca, y_train_rf = smote.fit_resample(X_train_pca, y_train_rf)
+        print("Applied SMOTE to balance the RF training dataset.")
 
     return {
         "cnn_train_loader": cnn_train_loader,
@@ -438,10 +541,9 @@ def prepare_bloodmnist_data(
         "rf_val_data":   (X_val_pca,   y_val_rf),
         "rf_test_data":  (X_test_pca,  y_test_rf),
         "scaler":        scaler,
-        "pca":           pca
+        "pca":           pca,
+        "selector":      selector
     }
-
-
 
 #------------------------------------------------------------------- End of Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -473,9 +575,9 @@ def setup_logging(log_file='training.log'):
 #--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
 def objective(trial, X_train_dt, y_train_dt):
     # Define the hyperparameter space
-    max_depth = trial.suggest_int('max_depth', 3, 30)
-    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
-    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
+    max_depth = trial.suggest_int('max_depth', 3, 50)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 30)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 30)
     criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
     # Example: ccp_alpha in [1e-5, 0.01], log scale
     ccp_alpha = trial.suggest_float('ccp_alpha', 1e-5, 0.01, log=True)
@@ -612,7 +714,8 @@ def main():
         data_dir="./Datasets/BreastMNIST",
         n_components=0,              # set to 0 to skip PCA
         apply_feature_selection=False, # True if you want RFE
-        n_features=20             # number of features if RFE is applied
+        n_features=20,             # number of features if RFE is applied
+        apply_smote = False
     )
     
     X_train_dt = data_dict["X_train"]
@@ -631,11 +734,11 @@ def main():
     print(" - X_test_dt:", X_test_dt.shape)
     print(" - y_test_dt:", y_test_dt.shape)
 
-
+    '''
     # Step 2: Hyperparameter Tuning with Optuna
     print("\nStarting Decision Tree Hyperparameter Tuning with Optuna.")
     study = optuna.create_study(direction='maximize')
-    study.optimize(lambda trial: objective(trial, X_train_dt, y_train_dt), n_trials=100, timeout=3600)  # Adjust as needed
+    study.optimize(lambda trial: objective(trial, X_train_dt, y_train_dt), n_trials=500, timeout=360)  # Adjust as needed
 
     print("Best F1-Score:", study.best_value)
     print("Best Parameters:", study.best_params)
@@ -667,7 +770,8 @@ def main():
     test_report = classification_report(y_test_dt, y_test_pred_dt)
     print("\nDecision Tree (Task A) Test Results:")
     print(test_report)
-    
+    '''
+
     # Step 2: Hyperparameter Tuning
     logger.info("Starting Decision Tree Hyperparameter Tuning.")
     dt_grid_search = tune_decision_tree(X_train_dt, y_train_dt, logger=logger)
@@ -713,6 +817,24 @@ def main():
     
     logger.info("Completed Task A: BreastMNIST + Decision Tree.\n")
     print("\nData preparation, hyperparameter tuning, and evaluation for Task A completed successfully.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Uncomment this if you want to auto-run the main when you do `python main.py`
 if __name__ == "__main__":
