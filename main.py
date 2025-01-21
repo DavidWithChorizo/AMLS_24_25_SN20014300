@@ -27,6 +27,7 @@ from medmnist import BreastMNIST, BloodMNIST
 from sklearn.feature_selection import RFE
 import logging
 from sklearn.model_selection import StratifiedKFold
+from imblearn.over_sampling import SMOTE
 
 #------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -121,7 +122,7 @@ def preprocess_for_rf(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
 
 
 def feature_selection_rf(X_train_pca: np.ndarray, y_train: np.ndarray, 
-                         X_val_pca: np.ndarray, n_features=20):
+                         X_val_pca: np.ndarray, n_features=30):
     """
     Apply Recursive Feature Elimination (RFE) using a RandomForest as the estimator.
     Even if you end up training a Decision Tree, 
@@ -191,7 +192,8 @@ def prepare_breastmnist_data(
     data_dir="data_breast",
     n_components=0,           # 0 => skip PCA, but still scale
     apply_feature_selection=False,
-    n_features=20
+    n_features=20,            # Number of features to keep if RFE is used
+    apply_smote=False         # New parameter for SMOTE
 ):
     """
     Task A: Prepare BreastMNIST dataset ONLY for a Decision Tree (or any tree-based model).
@@ -257,6 +259,12 @@ def prepare_breastmnist_data(
     X_train, y_train = flatten_features(rf_train_loader)
     X_val,   y_val   = flatten_features(rf_val_loader)
     X_test,  y_test  = flatten_features(rf_test_loader)
+
+    #ravel y_train
+    y_train = y_train.ravel()
+
+
+
 
     # Step 5. Scale + optional PCA
     (X_train_processed, X_val_processed, X_test_processed), scaler, pca = preprocess_for_rf(
@@ -468,9 +476,9 @@ def tune_decision_tree(X_train, y_train, logger=None):
     
     dt = DecisionTreeClassifier(random_state=42)
     param_grid = {
-        'max_depth': [None, 10, 20, 30, 40, 50],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
+        'max_depth': [None, 3, 5, 7, 10, 12, 15, 17, 20, 23, 26, 30],
+        'min_samples_split': [2, 5,7, 10],
+        'min_samples_leaf': [1, 2, 4, 8],
         'criterion': ['gini', 'entropy']
     }
     
@@ -568,9 +576,9 @@ def main():
         batch_size=32,
         download=True,
         data_dir="./Datasets/BreastMNIST",
-        n_components=10,              # set to 0 to skip PCA
+        n_components=0,              # set to 0 to skip PCA
         apply_feature_selection=False, # True if you want RFE
-        n_features=10                 # number of features if RFE is applied
+        n_features=20             # number of features if RFE is applied
     )
     
     X_train_dt = data_dict["X_train"]
