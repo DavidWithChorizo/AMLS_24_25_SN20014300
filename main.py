@@ -28,6 +28,10 @@ from sklearn.feature_selection import RFE
 import logging
 from sklearn.model_selection import StratifiedKFold
 from imblearn.over_sampling import SMOTE
+import optuna
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import f1_score, make_scorer
 
 #------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -467,6 +471,36 @@ def setup_logging(log_file='training.log'):
 
 
 #--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
+def objective(trial, X_train_dt, y_train_dt):
+    # Define the hyperparameter space
+    max_depth = trial.suggest_int('max_depth', 3, 30)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
+    criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
+    # Example: ccp_alpha in [1e-5, 0.01], log scale
+    ccp_alpha = trial.suggest_float('ccp_alpha', 1e-5, 0.01, log=True)
+
+    # Create the Decision Tree with suggested hyperparameters
+    clf = DecisionTreeClassifier(
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        min_samples_leaf=min_samples_leaf,
+        criterion=criterion,
+        ccp_alpha=ccp_alpha,
+        class_weight='balanced',
+        random_state=42
+    )
+
+    # Evaluate using cross-validation
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scores = cross_val_score(clf, X_train_dt, y_train_dt, cv=skf, scoring='f1_weighted', n_jobs=-1)
+
+    # Return the average F1-Score
+    return scores.mean()
+
+
+
+
 def tune_decision_tree(X_train, y_train, logger=None):
     """
     Hyperparameter tuning for Decision Tree using GridSearchCV.
@@ -596,6 +630,43 @@ def main():
     print(" - y_val_dt:", y_val_dt.shape)
     print(" - X_test_dt:", X_test_dt.shape)
     print(" - y_test_dt:", y_test_dt.shape)
+
+
+    # Step 2: Hyperparameter Tuning with Optuna
+    print("\nStarting Decision Tree Hyperparameter Tuning with Optuna.")
+    study = optuna.create_study(direction='maximize')
+    study.optimize(lambda trial: objective(trial, X_train_dt, y_train_dt), n_trials=100, timeout=3600)  # Adjust as needed
+
+    print("Best F1-Score:", study.best_value)
+    print("Best Parameters:", study.best_params)
+
+    # Retrieve the best hyperparameters
+    best_params = study.best_params
+
+    # Create and train the best Decision Tree
+    best_dt = DecisionTreeClassifier(
+        max_depth=best_params['max_depth'],
+        min_samples_split=best_params['min_samples_split'],
+        min_samples_leaf=best_params['min_samples_leaf'],
+        criterion=best_params['criterion'],
+        ccp_alpha=best_params['ccp_alpha'],
+        class_weight='balanced',
+        random_state=42
+    )
+    
+    best_dt.fit(X_train_dt, y_train_dt)
+
+    # Evaluate on Validation Set
+    y_val_pred_dt = best_dt.predict(X_val_dt)
+    val_report = classification_report(y_val_dt, y_val_pred_dt)
+    print("\nDecision Tree (Task A) Validation Results:")
+    print(val_report)
+
+    # Evaluate on Test Set
+    y_test_pred_dt = best_dt.predict(X_test_dt)
+    test_report = classification_report(y_test_dt, y_test_pred_dt)
+    print("\nDecision Tree (Task A) Test Results:")
+    print(test_report)
     
     # Step 2: Hyperparameter Tuning
     logger.info("Starting Decision Tree Hyperparameter Tuning.")
