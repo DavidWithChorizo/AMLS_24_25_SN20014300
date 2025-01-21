@@ -55,6 +55,9 @@ from medmnist import BloodMNIST
 from sklearn.feature_selection import RFE
 import logging
 from imblearn.over_sampling import SMOTE
+import os
+import joblib
+from sklearn.metrics import classification_report
 
 #------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -549,7 +552,20 @@ def prepare_bloodmnist_data(
 
 
 
-#--------------------------------- Training and Evaluation Codes ---------------------------------#
+
+
+
+
+
+
+
+
+
+################################################################################
+#                           Training and Evaluation Codes for Task A
+################################################################################
+
+
 
 #--------------------------------- Logging Setup ---------------------------------#
 
@@ -678,12 +694,273 @@ def tune_random_forest(X_train, y_train, logger=None):
 
 
 
+################################################################################
+#                           Training and Evaluation Codes for Task B
+################################################################################
+
+
+#--------------------------------- Logging Setup ---------------------------------#
+
+def setup_logging(log_file='training_taskB.log'):
+    """
+    Configure logging to write info messages to a file.
+
+    Args:
+        log_file (str): Filename for logging output.
+
+    Returns:
+        logging.Logger: Configured logger object.
+    """
+    logging.basicConfig(
+        filename=log_file,
+        filemode='a',
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    return logging.getLogger()
+
+
+#--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
+
+def objective_rf(trial, X_train_rf, y_train_rf):
+    """
+    Objective function for Optuna to optimize Random Forest hyperparameters.
+
+    Args:
+        trial (optuna.trial.Trial): A trial object that stores hyperparameters.
+        X_train_rf (np.ndarray): Training features for Random Forest.
+        y_train_rf (np.ndarray): Training labels for Random Forest.
+
+    Returns:
+        float: Mean cross-validated F1-Score of the Random Forest with the proposed hyperparameters.
+    """
+    # Define the hyperparameter space
+    n_estimators = trial.suggest_int('n_estimators', 100, 500)
+    max_depth = trial.suggest_int('max_depth', 10, 50)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
+    bootstrap = trial.suggest_categorical('bootstrap', [True, False])
+    criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
+
+    # Create the Random Forest with suggested hyperparameters
+    rf = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        min_samples_leaf=min_samples_leaf,
+        bootstrap=bootstrap,
+        criterion=criterion,
+        class_weight='balanced',
+        random_state=42,
+        n_jobs=-1
+    )
+
+    # Evaluate using cross-validation
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scores = cross_val_score(rf, X_train_rf, y_train_rf, cv=skf, scoring='f1_weighted', n_jobs=-1)
+
+    # Return the average F1-Score
+    return scores.mean()
+
+
+def objective_cnn(trial, model, train_loader, val_loader, device):
+    """
+    Objective function for Optuna to optimize CNN hyperparameters.
+
+    Args:
+        trial (optuna.trial.Trial): A trial object that stores hyperparameters.
+        model (nn.Module): CNN model to be trained.
+        train_loader (DataLoader): DataLoader for training data.
+        val_loader (DataLoader): DataLoader for validation data.
+        device (torch.device): Device to train the model on.
+
+    Returns:
+        float: Validation F1-Score of the CNN with the proposed hyperparameters.
+    """
+    # Define hyperparameter space
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+    optimizer_name = trial.suggest_categorical('optimizer', ['Adam', 'SGD'])
+    dropout_rate = trial.suggest_float('dropout_rate', 0.2, 0.7)
+
+    # Modify the model's dropout rate
+    model.classifier[0].p = dropout_rate
+    model.classifier[3].p = dropout_rate
+
+    # Define optimizer
+    if optimizer_name == 'Adam':
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+
+    # Define loss function
+    criterion = nn.CrossEntropyLoss()
+
+    # Training loop for a few epochs
+    num_epochs = 5  # For faster Optuna trials; adjust as needed
+    for epoch in range(num_epochs):
+        model.train()
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+    # Validation
+    model.eval()
+    all_preds = []
+    all_labels = []
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    # Calculate F1-Score
+    f1 = f1_score(all_labels, all_preds, average='weighted')
+    return f1
+
+
+################################################################################
+#                           Training and Evaluation Functions
+################################################################################
+
+def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=1e-3, optimizer_type='Adam', dropout_rate=0.5):
+    """
+    Train the CNN model.
+
+    Args:
+        model (nn.Module): CNN model to be trained.
+        train_loader (DataLoader): DataLoader for training data.
+        val_loader (DataLoader): DataLoader for validation data.
+        device (torch.device): Device to train the model on.
+        epochs (int): Number of training epochs.
+        learning_rate (float): Learning rate for the optimizer.
+        optimizer_type (str): Type of optimizer ('Adam' or 'SGD').
+        dropout_rate (float): Dropout rate in the classifier layers.
+
+    Returns:
+        nn.Module: Trained CNN model.
+        list: Training loss history.
+        list: Validation F1-Score history.
+    """
+    # Move model to device
+    model = model.to(device)
+
+    # Update dropout rates
+    model.classifier[0].p = dropout_rate
+    model.classifier[3].p = dropout_rate
+
+    # Define optimizer
+    if optimizer_type == 'Adam':
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
+
+    # Define loss function
+    criterion = nn.CrossEntropyLoss()
+
+    train_losses = []
+    val_f1_scores = []
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        running_loss = 0.0
+
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * inputs.size(0)
+
+        epoch_loss = running_loss / len(train_loader.dataset)
+        train_losses.append(epoch_loss)
+
+        # Validation
+        model.eval()
+        all_preds = []
+        all_labels = []
+        with torch.no_grad():
+            for inputs, labels in val_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        f1 = f1_score(all_labels, all_preds, average='weighted')
+        val_f1_scores.append(f1)
+
+        print(f'Epoch {epoch}/{epochs} | Loss: {epoch_loss:.4f} | Val F1-Score: {f1:.4f}')
+
+    return model, train_losses, val_f1_scores
+
+
+def evaluate_model(model, test_loader, device, model_type='CNN'):
+    """
+    Evaluate the trained model on the test set.
+
+    Args:
+        model (nn.Module or sklearn estimator): Trained model.
+        test_loader (DataLoader or tuple): DataLoader for CNN or tuple for RF.
+        device (torch.device): Device for CNN evaluation.
+        model_type (str): Type of model ('CNN' or 'RF').
+
+    Returns:
+        None
+    """
+    if model_type == 'CNN':
+        model.eval()
+        all_preds = []
+        all_labels = []
+        with torch.no_grad():
+            for inputs, labels in test_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        print(f'\nCNN Test Results:')
+        print(classification_report(all_labels, all_preds))
+        # Plot Confusion Matrix
+        cm = confusion_matrix(all_labels, all_preds)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=range(8))
+        disp.plot(cmap=plt.cm.Blues)
+        plt.title('CNN Confusion Matrix')
+        plt.show()
+
+    elif model_type == 'RF':
+        X_test_rf, y_test_rf = test_loader  # Assuming test_loader is a tuple (X_test, y_test)
+        y_pred_rf = model.predict(X_test_rf)
+
+        print(f'\nRandom Forest Test Results:')
+        print(classification_report(y_test_rf, y_pred_rf))
+        # Plot Confusion Matrix
+        cm = confusion_matrix(y_test_rf, y_pred_rf)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=range(8))
+        disp.plot(cmap=plt.cm.Blues)
+        plt.title('Random Forest Confusion Matrix')
+        plt.show()
 
 
 
 
 
 
+
+
+
+Task = 'B'
 
 
 
@@ -698,125 +975,258 @@ def main():
     3. Evaluate on validation & test
     4. Save the trained model (and scaler/PCA) to ./A/
     """
-    import os
-    import joblib
-    from sklearn.metrics import classification_report
-    
-    # Setup logging
-    logger = setup_logging('training_taskA.log')
-    logger.info("Starting Task A: BreastMNIST + Decision Tree.")
-    
-    # Step 1: Prepare data for Decision Tree
-    print("\n--- Preparing BreastMNIST for Decision Tree (Task A) ---")
-    data_dict = prepare_breastmnist_data(
-        batch_size=32,
-        download=True,
-        data_dir="./Datasets/BreastMNIST",
-        n_components=0,              # set to 0 to skip PCA
-        apply_feature_selection=False, # True if you want RFE
-        n_features=20,             # number of features if RFE is applied
-        apply_smote = False
-    )
-    
-    X_train_dt = data_dict["X_train"]
-    y_train_dt = data_dict["y_train"]
-    X_val_dt   = data_dict["X_val"]
-    y_val_dt   = data_dict["y_val"]
-    X_test_dt  = data_dict["X_test"]
-    y_test_dt  = data_dict["y_test"]
-    
-    # Confirm shapes
-    print("\n[Check shapes for Decision Tree usage on BreastMNIST]")
-    print(" - X_train_dt:", X_train_dt.shape)
-    print(" - y_train_dt:", y_train_dt.shape)
-    print(" - X_val_dt:", X_val_dt.shape)
-    print(" - y_val_dt:", y_val_dt.shape)
-    print(" - X_test_dt:", X_test_dt.shape)
-    print(" - y_test_dt:", y_test_dt.shape)
+    if Task == 'A':
+            # Setup logging
+        logger = setup_logging('training_taskA.log')
+        logger.info("Starting Task A: BreastMNIST + Decision Tree.")
+        
+        # Step 1: Prepare data for Decision Tree
+        print("\n--- Preparing BreastMNIST for Decision Tree (Task A) ---")
+        data_dict = prepare_breastmnist_data(
+            batch_size=32,
+            download=True,
+            data_dir="./Datasets/BreastMNIST",
+            n_components=0,              # set to 0 to skip PCA
+            apply_feature_selection=False, # True if you want RFE
+            n_features=20,             # number of features if RFE is applied
+            apply_smote = False
+        )
+        
+        X_train_dt = data_dict["X_train"]
+        y_train_dt = data_dict["y_train"]
+        X_val_dt   = data_dict["X_val"]
+        y_val_dt   = data_dict["y_val"]
+        X_test_dt  = data_dict["X_test"]
+        y_test_dt  = data_dict["y_test"]
+        
+        # Confirm shapes
+        print("\n[Check shapes for Decision Tree usage on BreastMNIST]")
+        print(" - X_train_dt:", X_train_dt.shape)
+        print(" - y_train_dt:", y_train_dt.shape)
+        print(" - X_val_dt:", X_val_dt.shape)
+        print(" - y_val_dt:", y_val_dt.shape)
+        print(" - X_test_dt:", X_test_dt.shape)
+        print(" - y_test_dt:", y_test_dt.shape)
 
-    '''
-    # Step 2: Hyperparameter Tuning with Optuna
-    print("\nStarting Decision Tree Hyperparameter Tuning with Optuna.")
-    study = optuna.create_study(direction='maximize')
-    study.optimize(lambda trial: objective(trial, X_train_dt, y_train_dt), n_trials=500, timeout=360)  # Adjust as needed
+        '''
+        # Step 2: Hyperparameter Tuning with Optuna
+        print("\nStarting Decision Tree Hyperparameter Tuning with Optuna.")
+        study = optuna.create_study(direction='maximize')
+        study.optimize(lambda trial: objective(trial, X_train_dt, y_train_dt), n_trials=500, timeout=360)  # Adjust as needed
 
-    print("Best F1-Score:", study.best_value)
-    print("Best Parameters:", study.best_params)
+        print("Best F1-Score:", study.best_value)
+        print("Best Parameters:", study.best_params)
 
-    # Retrieve the best hyperparameters
-    best_params = study.best_params
+        # Retrieve the best hyperparameters
+        best_params = study.best_params
 
-    # Create and train the best Decision Tree
-    best_dt = DecisionTreeClassifier(
-        max_depth=best_params['max_depth'],
-        min_samples_split=best_params['min_samples_split'],
-        min_samples_leaf=best_params['min_samples_leaf'],
-        criterion=best_params['criterion'],
-        ccp_alpha=best_params['ccp_alpha'],
-        class_weight='balanced',
-        random_state=42
-    )
-    
-    best_dt.fit(X_train_dt, y_train_dt)
+        # Create and train the best Decision Tree
+        best_dt = DecisionTreeClassifier(
+            max_depth=best_params['max_depth'],
+            min_samples_split=best_params['min_samples_split'],
+            min_samples_leaf=best_params['min_samples_leaf'],
+            criterion=best_params['criterion'],
+            ccp_alpha=best_params['ccp_alpha'],
+            class_weight='balanced',
+            random_state=42
+        )
+        
+        best_dt.fit(X_train_dt, y_train_dt)
 
-    # Evaluate on Validation Set
-    y_val_pred_dt = best_dt.predict(X_val_dt)
-    val_report = classification_report(y_val_dt, y_val_pred_dt)
-    print("\nDecision Tree (Task A) Validation Results:")
-    print(val_report)
+        # Evaluate on Validation Set
+        y_val_pred_dt = best_dt.predict(X_val_dt)
+        val_report = classification_report(y_val_dt, y_val_pred_dt)
+        print("\nDecision Tree (Task A) Validation Results:")
+        print(val_report)
 
-    # Evaluate on Test Set
-    y_test_pred_dt = best_dt.predict(X_test_dt)
-    test_report = classification_report(y_test_dt, y_test_pred_dt)
-    print("\nDecision Tree (Task A) Test Results:")
-    print(test_report)
-    '''
+        # Evaluate on Test Set
+        y_test_pred_dt = best_dt.predict(X_test_dt)
+        test_report = classification_report(y_test_dt, y_test_pred_dt)
+        print("\nDecision Tree (Task A) Test Results:")
+        print(test_report)
+        '''
 
-    # Step 2: Hyperparameter Tuning
-    logger.info("Starting Decision Tree Hyperparameter Tuning.")
-    dt_grid_search = tune_decision_tree(X_train_dt, y_train_dt, logger=logger)
-    
-    # Retrieve best Decision Tree
-    best_dt = dt_grid_search.best_estimator_
-    # Optionally set class_weight to handle imbalance
-    best_dt.set_params(class_weight='balanced')
-    
-    # Retrain best Decision Tree on the entire training set
-    best_dt.fit(X_train_dt, y_train_dt)
-    
-    # Step 3: Evaluate on Validation & Test
-    print("\nDecision Tree (Task A) Validation Results:")
-    y_val_pred_dt = best_dt.predict(X_val_dt)
-    val_report = classification_report(y_val_dt, y_val_pred_dt)
-    print(val_report)
-    logger.info("Decision Tree (Task A) Validation Report:")
-    logger.info(val_report)
-    
-    print("\nDecision Tree (Task A) Test Results:")
-    y_test_pred_dt = best_dt.predict(X_test_dt)
-    test_report = classification_report(y_test_dt, y_test_pred_dt)
-    print(test_report)
-    logger.info("Decision Tree (Task A) Test Report:")
-    logger.info(test_report)
-    
-    # Step 4: Save the Trained Model + Preprocessing
-    os.makedirs("./A", exist_ok=True)
-    
-    dt_model_path = "./A/best_decision_tree.joblib"
-    joblib.dump(best_dt, dt_model_path)
-    logger.info(f"Saved Decision Tree model to {dt_model_path}.")
-    
-    scaler_path = "./A/breast_scaler.joblib"
-    joblib.dump(data_dict["scaler"], scaler_path)
-    logger.info(f"Saved BreastMNIST scaler to {scaler_path}.")
-    
-    if data_dict["pca"] is not None:
-        pca_path = "./A/breast_pca.joblib"
-        joblib.dump(data_dict["pca"], pca_path)
-        logger.info(f"Saved BreastMNIST PCA to {pca_path}.")
-    
-    logger.info("Completed Task A: BreastMNIST + Decision Tree.\n")
-    print("\nData preparation, hyperparameter tuning, and evaluation for Task A completed successfully.")
+        # Step 2: Hyperparameter Tuning
+        logger.info("Starting Decision Tree Hyperparameter Tuning.")
+        dt_grid_search = tune_decision_tree(X_train_dt, y_train_dt, logger=logger)
+        
+        # Retrieve best Decision Tree
+        best_dt = dt_grid_search.best_estimator_
+        # Optionally set class_weight to handle imbalance
+        best_dt.set_params(class_weight='balanced')
+        
+        # Retrain best Decision Tree on the entire training set
+        best_dt.fit(X_train_dt, y_train_dt)
+        
+        # Step 3: Evaluate on Validation & Test
+        print("\nDecision Tree (Task A) Validation Results:")
+        y_val_pred_dt = best_dt.predict(X_val_dt)
+        val_report = classification_report(y_val_dt, y_val_pred_dt)
+        print(val_report)
+        logger.info("Decision Tree (Task A) Validation Report:")
+        logger.info(val_report)
+        
+        print("\nDecision Tree (Task A) Test Results:")
+        y_test_pred_dt = best_dt.predict(X_test_dt)
+        test_report = classification_report(y_test_dt, y_test_pred_dt)
+        print(test_report)
+        logger.info("Decision Tree (Task A) Test Report:")
+        logger.info(test_report)
+        
+        # Step 4: Save the Trained Model + Preprocessing
+        os.makedirs("./A", exist_ok=True)
+        
+        dt_model_path = "./A/best_decision_tree.joblib"
+        joblib.dump(best_dt, dt_model_path)
+        logger.info(f"Saved Decision Tree model to {dt_model_path}.")
+        
+        scaler_path = "./A/breast_scaler.joblib"
+        joblib.dump(data_dict["scaler"], scaler_path)
+        logger.info(f"Saved BreastMNIST scaler to {scaler_path}.")
+        
+        if data_dict["pca"] is not None:
+            pca_path = "./A/breast_pca.joblib"
+            joblib.dump(data_dict["pca"], pca_path)
+            logger.info(f"Saved BreastMNIST PCA to {pca_path}.")
+        
+        logger.info("Completed Task A: BreastMNIST + Decision Tree.\n")
+        print("\nData preparation, hyperparameter tuning, and evaluation for Task A completed successfully.")
+
+
+
+
+
+
+
+
+    elif Task == 'B':
+        # Setup logging
+        logger = setup_logging('training_taskB.log')
+        logger.info("Starting Task B: BloodMNIST + CNN + Random Forest.")
+
+        # 1. Prepare data
+        print("\n--- Preparing BloodMNIST for CNN and Random Forest (Task B) ---")
+        data_dict = prepare_bloodmnist_data(
+            batch_size=32,
+            download=True,
+            data_dir="./Datasets/BloodMNIST",
+            n_components=50,               # Number of PCA components for RF
+            apply_feature_selection=True,  # Apply RFE for RF
+            n_features=30,                 # Number of features to keep if RFE is applied
+            apply_smote=True               # Apply SMOTE to balance RF training set
+        )
+
+        # Extract CNN DataLoaders
+        cnn_train_loader = data_dict["cnn_train_loader"]
+        cnn_val_loader   = data_dict["cnn_val_loader"]
+        cnn_test_loader  = data_dict["cnn_test_loader"]
+
+        # Extract RF Data
+        X_train_rf, y_train_rf = data_dict["rf_train_data"]
+        X_val_rf, y_val_rf     = data_dict["rf_val_data"]
+        X_test_rf, y_test_rf   = data_dict["rf_test_data"]
+
+        scaler_rf = data_dict["scaler"]
+        pca_rf = data_dict["pca"]
+        selector_rf = data_dict["selector"]
+
+        # Confirm shapes for RF
+        print("\n[Check shapes for Random Forest usage on BloodMNIST]")
+        print(" - X_train_rf:", X_train_rf.shape)
+        print(" - y_train_rf:", y_train_rf.shape)
+        print(" - X_val_rf:", X_val_rf.shape)
+        print(" - y_val_rf:", y_val_rf.shape)
+        print(" - X_test_rf:", X_test_rf.shape)
+        print(" - y_test_rf:", y_test_rf.shape)
+
+        # 2. Define device for CNN
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"\nUsing device: {device}")
+
+        # 3. Initialize CNN Model
+        num_classes = 8  # Adjust based on BloodMNIST classes
+        cnn_model = BloodMNIST_CNN(num_classes=num_classes)
+
+        # 4. Train CNN
+        print("\n--- Training CNN ---")
+        cnn_trained, cnn_train_losses, cnn_val_f1_scores = train_cnn(
+            model=cnn_model,
+            train_loader=cnn_train_loader,
+            val_loader=cnn_val_loader,
+            device=device,
+            epochs=20,                # Adjust number of epochs as needed
+            learning_rate=1e-3,
+            optimizer_type='Adam',
+            dropout_rate=0.5
+        )
+
+        # 5. Evaluate CNN on Test Set
+        evaluate_model(cnn_trained, cnn_test_loader, device, model_type='CNN')
+
+        # 6. Train Random Forest with Hyperparameter Tuning using Optuna
+        print("\n--- Hyperparameter Tuning for Random Forest using Optuna ---")
+        study_rf = optuna.create_study(direction='maximize', sampler=TPESampler())
+        study_rf.optimize(lambda trial: objective_rf(trial, X_train_rf, y_train_rf), n_trials=50, timeout=3600)
+
+        print(f"Best Random Forest F1-Score (Optuna): {study_rf.best_value:.4f}")
+        print(f"Best Parameters (Optuna): {study_rf.best_params}")
+
+        # 7. Train Best Random Forest
+        best_params_rf = study_rf.best_params
+        best_rf = RandomForestClassifier(
+            n_estimators=best_params_rf['n_estimators'],
+            max_depth=best_params_rf['max_depth'],
+            min_samples_split=best_params_rf['min_samples_split'],
+            min_samples_leaf=best_params_rf['min_samples_leaf'],
+            bootstrap=best_params_rf['bootstrap'],
+            criterion=best_params_rf['criterion'],
+            class_weight='balanced',
+            random_state=42,
+            n_jobs=-1
+        )
+        best_rf.fit(X_train_rf, y_train_rf)
+
+        # 8. Evaluate Random Forest on Validation Set
+        print("\n--- Evaluating Random Forest on Validation Set ---")
+        y_val_pred_rf = best_rf.predict(X_val_rf)
+        print(classification_report(y_val_rf, y_val_pred_rf))
+
+        # 9. Evaluate Random Forest on Test Set
+        evaluate_model(best_rf, (X_test_rf, y_test_rf), device, model_type='RF')
+
+        # 10. Save Trained Models and Preprocessing Artifacts
+        os.makedirs("./B", exist_ok=True)
+
+        # Save CNN Model
+        cnn_model_path = "./B/bloodmnist_cnn.pth"
+        torch.save(cnn_trained.state_dict(), cnn_model_path)
+        logger.info(f"Saved CNN model to {cnn_model_path}.")
+
+        # Save Random Forest Model
+        rf_model_path = "./B/bloodmnist_rf.joblib"
+        joblib.dump(best_rf, rf_model_path)
+        logger.info(f"Saved Random Forest model to {rf_model_path}.")
+
+        # Save Scaler and PCA for RF
+        scaler_path = "./B/blood_scaler.joblib"
+        joblib.dump(scaler_rf, scaler_path)
+        logger.info(f"Saved BloodMNIST scaler to {scaler_path}.")
+
+        if pca_rf is not None:
+            pca_path = "./B/blood_pca.joblib"
+            joblib.dump(pca_rf, pca_path)
+            logger.info(f"Saved BloodMNIST PCA to {pca_path}.")
+
+        if selector_rf is not None:
+            selector_path = "./B/blood_rfe.joblib"
+            joblib.dump(selector_rf, selector_path)
+            logger.info(f"Saved BloodMNIST RFE selector to {selector_path}.")
+
+        logger.info("Completed Task B: BloodMNIST + CNN + Random Forest.\n")
+        print("\nTask B completed successfully: CNN and Random Forest models trained and evaluated.")       
+
+        
+
 
 
 
