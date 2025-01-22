@@ -621,6 +621,23 @@ def tune_decision_tree(X_train, y_train, logger=None):
     grid_search = GridSearchCV(estimator=dt, param_grid=param_grid, 
                                cv=skf, n_jobs=-1, scoring='f1', verbose=1)
     grid_search.fit(X_train, y_train)  # y_train is now 1D
+
+
+    results = grid_search.cv_results_
+    mean_test_scores = results["mean_test_score"]  # average CV score for each param setting
+    best_so_far = []
+    current_best = -999
+    for score in mean_test_scores:
+        current_best = max(current_best, score)
+        best_so_far.append(current_best)
+
+    plt.plot(best_so_far, marker='o', label='Best so far')
+    plt.xlabel('Param Set Index')
+    plt.ylabel('F1 Score')
+    plt.title('GridSearchCV Param Sets vs. F1')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
     
     if logger:
         logger.info("Decision Tree Hyperparameter Tuning Completed.")
@@ -756,9 +773,9 @@ def objective_rf(trial, X_train_rf, y_train_rf):
     """
     # Define the hyperparameter space
     n_estimators = trial.suggest_int('n_estimators', 100, 500)
-    max_depth = trial.suggest_int('max_depth', 10, 50)
-    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
-    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
+    max_depth = trial.suggest_int('max_depth', 1,2,3,4,5)
+    min_samples_split = trial.suggest_int('min_samples_split', 1,2,3)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 2,3)
     bootstrap = trial.suggest_categorical('bootstrap', [True, False])
     criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
 
@@ -811,6 +828,22 @@ def tune_random_forest(X_train, y_train, logger=None):
     )
     
     grid_search.fit(X_train, y_train)
+
+    results = grid_search.cv_results_
+    mean_test_scores = results["mean_test_score"]  # average CV score for each param setting
+    best_so_far = []
+    current_best = -999
+    for score in mean_test_scores:
+        current_best = max(current_best, score)
+        best_so_far.append(current_best)
+
+    plt.plot(best_so_far, marker='o', label='Best so far')
+    plt.xlabel('Param Set Index')
+    plt.ylabel('F1 Score')
+    plt.title('GridSearchCV Param Sets vs. F1')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
     
     if logger:
         logger.info("Random Forest GridSearch Complete")
@@ -938,6 +971,8 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
 
         batch_pbar = tqdm(train_loader, desc='Training', leave=False)
         for inputs, labels in batch_pbar:
+                # Squeeze any extra dimension from the labels:
+            labels = labels.squeeze()
             inputs, labels = inputs.to(device), labels.to(device)
 
             optimizer.zero_grad()
@@ -961,6 +996,7 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
         with torch.no_grad():
             val_pbar = tqdm(val_loader, desc='Validation', leave=False)
             for inputs, labels in val_pbar:
+                labels = labels.squeeze()
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
@@ -1036,7 +1072,7 @@ def evaluate_model(model, test_loader, device, model_type='CNN', num_classes=Non
 
 
 
-Task = 'B'
+Task = 'B'  # Choose 'A' or 'B' for the respective task
 
 
 
@@ -1251,6 +1287,28 @@ def main():
                 dropout_rate=0.5,
                 logger=logger
             )
+
+            #Plot the curve of training loss and validation F1-Score
+            plt.figure(figsize=(10, 4))
+            plt.subplot(1, 2, 1)
+            plt.plot(cnn_train_losses, label='Training Loss')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            plt.title('CNN Training Loss')
+            plt.legend()
+            plt.grid(True)
+
+            plt.subplot(1, 2, 2)
+            plt.plot(cnn_val_f1_scores, label='Validation F1-Score', color='orange')
+            plt.xlabel('Epoch')
+            plt.ylabel('F1-Score')
+            plt.title('CNN Validation F1-Score')
+            plt.legend()
+            plt.grid(True)
+
+            plt.tight_layout()
+            plt.show()
+
 
             # Evaluate CNN on Test Set
             evaluate_model(cnn_trained, cnn_test_loader, device, model_type='CNN')
