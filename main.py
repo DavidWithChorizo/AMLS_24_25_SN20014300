@@ -58,6 +58,14 @@ from imblearn.over_sampling import SMOTE
 import os
 import joblib
 from sklearn.metrics import classification_report
+import warnings
+import argparse
+
+
+
+
+# Suppress FutureWarnings temporarily
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 #------------------------------------------------------------------- Dataset Preparation Codes -------------------------------------------------------------------#
 
@@ -508,6 +516,11 @@ def prepare_bloodmnist_data(
     X_val_rf, y_val_rf = flatten_features(rf_val_loader)
     X_test_rf, y_test_rf = flatten_features(rf_test_loader)
 
+    # 4.a. Ensure y is 1D
+    y_train_rf = y_train_rf.ravel()
+    y_val_rf = y_val_rf.ravel()
+    y_test_rf = y_test_rf.ravel()
+
     # 5. Scale + optional PCA
     (X_train_pca, X_val_pca, X_test_pca), scaler, pca = preprocess_for_rf(
         X_train_rf, X_val_rf, X_test_rf, n_components=n_components
@@ -699,6 +712,63 @@ def tune_random_forest(X_train, y_train, logger=None):
 ################################################################################
 
 
+#--------------------------------- CNN Model Definition ---------------------------------#
+
+class BloodMNIST_CNN(nn.Module):
+    """
+    Convolutional Neural Network tailored for BloodMNIST multi-class classification.
+
+    Architecture:
+    - 3 Convolutional layers with increasing channels
+    - MaxPooling after each convolution
+    - Fully connected layers with dropout
+    - Output layer with softmax activation
+    """
+
+    def __init__(self, num_classes=8):
+        super(BloodMNIST_CNN, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, padding=1),  # Changed to 3 channels
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # Output: 32x14x14
+
+            nn.Conv2d(32, 64, 3, padding=1),  # Output: 64x14x14
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # Output: 64x7x7
+
+            nn.Conv2d(64, 128, 3, padding=1),  # Output: 128x7x7
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2)  # Output: 128x3x3
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=0.5),
+            nn.Linear(128 * 3 * 3, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(256, num_classes)
+            # Note: CrossEntropyLoss in PyTorch applies Softmax internally
+        )
+
+    def forward(self, x):
+        """
+        Forward pass of the CNN.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, 3, 28, 28].
+
+        Returns:
+            torch.Tensor: Output logits of shape [batch_size, num_classes].
+        """
+        x = self.features(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        x = self.classifier(x)
+        return x
+
+
 #--------------------------------- Logging Setup ---------------------------------#
 
 def setup_logging(log_file='training_taskB.log'):
@@ -711,13 +781,28 @@ def setup_logging(log_file='training_taskB.log'):
     Returns:
         logging.Logger: Configured logger object.
     """
-    logging.basicConfig(
-        filename=log_file,
-        filemode='a',
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
-    return logging.getLogger()
+    logger = logging.getLogger('TrainingLogger')
+    logger.setLevel(logging.INFO)
+    
+    # Create handlers
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.INFO)
+    
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    
+    # Create formatter and add to handlers
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    
+    # Add handlers to logger
+    if not logger.handlers:
+        logger.addHandler(fh)
+        logger.addHandler(ch)
+    
+    return logger
+
 
 
 #--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
@@ -829,9 +914,9 @@ def objective_cnn(trial, model, train_loader, val_loader, device):
 #                           Training and Evaluation Functions
 ################################################################################
 
-def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=1e-3, optimizer_type='Adam', dropout_rate=0.5):
+def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=1e-3, optimizer_type='Adam', dropout_rate=0.5, logger=None):
     """
-    Train the CNN model.
+    Train the CNN model with progress bars.
 
     Args:
         model (nn.Module): CNN model to be trained.
@@ -842,6 +927,7 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
         learning_rate (float): Learning rate for the optimizer.
         optimizer_type (str): Type of optimizer ('Adam' or 'SGD').
         dropout_rate (float): Dropout rate in the classifier layers.
+        logger (logging.Logger): Logger object for logging info.
 
     Returns:
         nn.Module: Trained CNN model.
@@ -867,11 +953,13 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
     train_losses = []
     val_f1_scores = []
 
-    for epoch in range(1, epochs + 1):
+    epoch_pbar = tqdm(range(1, epochs + 1), desc='Epoch', leave=True)
+    for epoch in epoch_pbar:
         model.train()
         running_loss = 0.0
 
-        for inputs, labels in train_loader:
+        batch_pbar = tqdm(train_loader, desc='Training', leave=False)
+        for inputs, labels in batch_pbar:
             inputs, labels = inputs.to(device), labels.to(device)
 
             optimizer.zero_grad()
@@ -882,6 +970,9 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
 
             running_loss += loss.item() * inputs.size(0)
 
+            # Update batch progress bar
+            batch_pbar.set_postfix({'Batch Loss': loss.item()})
+
         epoch_loss = running_loss / len(train_loader.dataset)
         train_losses.append(epoch_loss)
 
@@ -890,7 +981,8 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
         all_preds = []
         all_labels = []
         with torch.no_grad():
-            for inputs, labels in val_loader:
+            val_pbar = tqdm(val_loader, desc='Validation', leave=False)
+            for inputs, labels in val_pbar:
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
@@ -900,7 +992,11 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
         f1 = f1_score(all_labels, all_preds, average='weighted')
         val_f1_scores.append(f1)
 
-        print(f'Epoch {epoch}/{epochs} | Loss: {epoch_loss:.4f} | Val F1-Score: {f1:.4f}')
+        # Update epoch progress bar
+        epoch_pbar.set_postfix({'Epoch Loss': epoch_loss, 'Val F1-Score': f1})
+
+        if logger:
+            logger.info(f'Epoch {epoch}/{epochs} | Loss: {epoch_loss:.4f} | Val F1-Score: {f1:.4f}')
 
     return model, train_losses, val_f1_scores
 
@@ -923,7 +1019,8 @@ def evaluate_model(model, test_loader, device, model_type='CNN'):
         all_preds = []
         all_labels = []
         with torch.no_grad():
-            for inputs, labels in test_loader:
+            pbar = tqdm(test_loader, desc='Testing', leave=False)
+            for inputs, labels in pbar:
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
@@ -1100,6 +1197,15 @@ def main():
 
 
     elif Task == 'B':
+        # Parse command-line arguments
+        parser = argparse.ArgumentParser(description="Train CNN and/or Random Forest on BloodMNIST.")
+        parser.add_argument('--train_cnn', action='store_true', help='Flag to train the CNN model.')
+        parser.add_argument('--train_rf', action='store_true', help='Flag to train the Random Forest model.')
+        parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for CNN training.')
+        parser.add_argument('--n_trials_rf', type=int, default=50, help='Number of Optuna trials for Random Forest.')
+        parser.add_argument('--n_trials_cnn', type=int, default=30, help='Number of Optuna trials for CNN hyperparameters (if implementing).')
+        args = parser.parse_args()
+
         # Setup logging
         logger = setup_logging('training_taskB.log')
         logger.info("Starting Task B: BloodMNIST + CNN + Random Forest.")
@@ -1140,90 +1246,123 @@ def main():
         print(" - y_test_rf:", y_test_rf.shape)
 
         # 2. Define device for CNN
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         print(f"\nUsing device: {device}")
 
-        # 3. Initialize CNN Model
-        num_classes = 8  # Adjust based on BloodMNIST classes
-        cnn_model = BloodMNIST_CNN(num_classes=num_classes)
+        # Initialize variables to hold models
+        cnn_trained = None
+        rf_trained = None
 
-        # 4. Train CNN
-        print("\n--- Training CNN ---")
-        cnn_trained, cnn_train_losses, cnn_val_f1_scores = train_cnn(
-            model=cnn_model,
-            train_loader=cnn_train_loader,
-            val_loader=cnn_val_loader,
-            device=device,
-            epochs=20,                # Adjust number of epochs as needed
-            learning_rate=1e-3,
-            optimizer_type='Adam',
-            dropout_rate=0.5
-        )
+        # 3. Train CNN if selected
+        if args.train_cnn:
+            # Initialize CNN Model
+            num_classes = 8  # Adjust based on BloodMNIST classes
+            cnn_model = BloodMNIST_CNN(num_classes=num_classes)
 
-        # 5. Evaluate CNN on Test Set
-        evaluate_model(cnn_trained, cnn_test_loader, device, model_type='CNN')
+            # Train CNN
+            print("\n--- Training CNN ---")
+            cnn_trained, cnn_train_losses, cnn_val_f1_scores = train_cnn(
+                model=cnn_model,
+                train_loader=cnn_train_loader,
+                val_loader=cnn_val_loader,
+                device=device,
+                epochs=args.epochs,                # Number of epochs
+                learning_rate=1e-3,
+                optimizer_type='Adam',
+                dropout_rate=0.5,
+                logger=logger
+            )
 
-        # 6. Train Random Forest with Hyperparameter Tuning using Optuna
-        print("\n--- Hyperparameter Tuning for Random Forest using Optuna ---")
-        study_rf = optuna.create_study(direction='maximize', sampler=TPESampler())
-        study_rf.optimize(lambda trial: objective_rf(trial, X_train_rf, y_train_rf), n_trials=50, timeout=3600)
+            # Evaluate CNN on Test Set
+            evaluate_model(cnn_trained, cnn_test_loader, device, model_type='CNN')
 
-        print(f"Best Random Forest F1-Score (Optuna): {study_rf.best_value:.4f}")
-        print(f"Best Parameters (Optuna): {study_rf.best_params}")
+            # Save CNN Model
+            os.makedirs("./B", exist_ok=True)
+            cnn_model_path = "./B/bloodmnist_cnn.pth"
+            torch.save(cnn_trained.state_dict(), cnn_model_path)
+            logger.info(f"Saved CNN model to {cnn_model_path}.")
 
-        # 7. Train Best Random Forest
-        best_params_rf = study_rf.best_params
-        best_rf = RandomForestClassifier(
-            n_estimators=best_params_rf['n_estimators'],
-            max_depth=best_params_rf['max_depth'],
-            min_samples_split=best_params_rf['min_samples_split'],
-            min_samples_leaf=best_params_rf['min_samples_leaf'],
-            bootstrap=best_params_rf['bootstrap'],
-            criterion=best_params_rf['criterion'],
-            class_weight='balanced',
-            random_state=42,
-            n_jobs=-1
-        )
-        best_rf.fit(X_train_rf, y_train_rf)
+        # 4. Train Random Forest if selected
+        if args.train_rf:
+            # Define a progress bar for Optuna trials
+            print("\n--- Hyperparameter Tuning for Random Forest using Optuna ---")
+            rf_study = optuna.create_study(direction='maximize', sampler=TPESampler())
+            rf_pbar = tqdm(total=args.n_trials_rf, desc='RF Hyperparameter Tuning')
 
-        # 8. Evaluate Random Forest on Validation Set
-        print("\n--- Evaluating Random Forest on Validation Set ---")
-        y_val_pred_rf = best_rf.predict(X_val_rf)
-        print(classification_report(y_val_rf, y_val_pred_rf))
+            def rf_callback(study, trial):
+                rf_pbar.update(1)
 
-        # 9. Evaluate Random Forest on Test Set
-        evaluate_model(best_rf, (X_test_rf, y_test_rf), device, model_type='RF')
+            rf_study.optimize(lambda trial: objective_rf(trial, X_train_rf, y_train_rf), 
+                            n_trials=args.n_trials_rf, 
+                            timeout=None,
+                            callbacks=[rf_callback])
 
-        # 10. Save Trained Models and Preprocessing Artifacts
-        os.makedirs("./B", exist_ok=True)
+            rf_pbar.close()
 
-        # Save CNN Model
-        cnn_model_path = "./B/bloodmnist_cnn.pth"
-        torch.save(cnn_trained.state_dict(), cnn_model_path)
-        logger.info(f"Saved CNN model to {cnn_model_path}.")
+            print(f"Best Random Forest F1-Score (Optuna): {rf_study.best_value:.4f}")
+            print(f"Best Parameters (Optuna): {rf_study.best_params}")
 
-        # Save Random Forest Model
-        rf_model_path = "./B/bloodmnist_rf.joblib"
-        joblib.dump(best_rf, rf_model_path)
-        logger.info(f"Saved Random Forest model to {rf_model_path}.")
+            logger.info(f"Best Random Forest F1-Score (Optuna): {rf_study.best_value:.4f}")
+            logger.info(f"Best Parameters (Optuna): {rf_study.best_params}")
 
-        # Save Scaler and PCA for RF
-        scaler_path = "./B/blood_scaler.joblib"
-        joblib.dump(scaler_rf, scaler_path)
-        logger.info(f"Saved BloodMNIST scaler to {scaler_path}.")
+            # Train Best Random Forest
+            best_params_rf = rf_study.best_params
+            best_rf = RandomForestClassifier(
+                n_estimators=best_params_rf['n_estimators'],
+                max_depth=best_params_rf['max_depth'],
+                min_samples_split=best_params_rf['min_samples_split'],
+                min_samples_leaf=best_params_rf['min_samples_leaf'],
+                bootstrap=best_params_rf['bootstrap'],
+                criterion=best_params_rf['criterion'],
+                class_weight='balanced',
+                random_state=42,
+                n_jobs=-1
+            )
+            # Implement progress bar for training if desired
+            print("\n--- Training Best Random Forest ---")
+            rf_pbar_train = tqdm(total=1, desc='RF Training')
+            best_rf.fit(X_train_rf, y_train_rf)
+            rf_pbar_train.update(1)
+            rf_pbar_train.close()
+            logger.info("Trained Random Forest with best hyperparameters.")
 
-        if pca_rf is not None:
-            pca_path = "./B/blood_pca.joblib"
-            joblib.dump(pca_rf, pca_path)
-            logger.info(f"Saved BloodMNIST PCA to {pca_path}.")
+            # Evaluate Random Forest on Validation Set
+            print("\n--- Evaluating Random Forest on Validation Set ---")
+            y_val_pred_rf = best_rf.predict(X_val_rf)
+            print(classification_report(y_val_rf, y_val_pred_rf))
+            logger.info("Random Forest Validation Report:")
+            logger.info(classification_report(y_val_rf, y_val_pred_rf))
 
-        if selector_rf is not None:
-            selector_path = "./B/blood_rfe.joblib"
-            joblib.dump(selector_rf, selector_path)
-            logger.info(f"Saved BloodMNIST RFE selector to {selector_path}.")
+            # Evaluate Random Forest on Test Set
+            evaluate_model(best_rf, (X_test_rf, y_test_rf), device, model_type='RF')
+
+            # Save Random Forest Model
+            os.makedirs("./B", exist_ok=True)
+            rf_model_path = "./B/bloodmnist_rf.joblib"
+            joblib.dump(best_rf, rf_model_path)
+            logger.info(f"Saved Random Forest model to {rf_model_path}.")
+
+        # 5. Save Preprocessing Artifacts if RF was trained
+        if args.train_rf:
+            os.makedirs("./B", exist_ok=True)
+
+            # Save Scaler and PCA for RF
+            scaler_path = "./B/blood_scaler.joblib"
+            joblib.dump(scaler_rf, scaler_path)
+            logger.info(f"Saved BloodMNIST scaler to {scaler_path}.")
+
+            if pca_rf is not None:
+                pca_path = "./B/blood_pca.joblib"
+                joblib.dump(pca_rf, pca_path)
+                logger.info(f"Saved BloodMNIST PCA to {pca_path}.")
+
+            if selector_rf is not None:
+                selector_path = "./B/blood_rfe.joblib"
+                joblib.dump(selector_rf, selector_path)
+                logger.info(f"Saved BloodMNIST RFE selector to {selector_path}.")
 
         logger.info("Completed Task B: BloodMNIST + CNN + Random Forest.\n")
-        print("\nTask B completed successfully: CNN and Random Forest models trained and evaluated.")       
+        print("\nTask B completed successfully: Selected models trained and evaluated.")
 
         
 
