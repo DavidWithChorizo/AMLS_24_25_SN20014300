@@ -129,7 +129,7 @@ def preprocess_for_rf(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
 
 
 def feature_selection_rf(X_train_pca: np.ndarray, y_train: np.ndarray, 
-                         X_val_pca: np.ndarray, n_features=30):
+                         X_val_pca: np.ndarray, n_features=0):
     """
     Apply Recursive Feature Elimination (RFE) using a RandomForest as the estimator.
     This is used to select the top 'n_features' based on feature importance.
@@ -198,7 +198,7 @@ def prepare_breastmnist_data(
     data_dir="data_breast",
     n_components=0,           # 0 => skip PCA, but still scale
     apply_feature_selection=False,
-    n_features=20,            # Number of features to keep if RFE is used
+    n_features=None,            # Number of features to keep if RFE is used
     apply_smote=False         # New parameter for SMOTE
 ):
     """
@@ -817,6 +817,49 @@ def objective_rf(trial, X_train_rf, y_train_rf):
     return scores.mean()
 
 
+def tune_random_forest(X_train, y_train, logger=None):
+    """
+    Tune Random Forest hyperparameters via GridSearchCV (5-fold Stratified).
+    Returns the best estimator from the search.
+    """
+    rf = RandomForestClassifier(random_state=42, class_weight='balanced')
+    
+    param_grid = {
+        "n_estimators":      [110, 150],
+        "max_depth":         [35, 38,40, 42, 45, 47,50],
+        "min_samples_split": [2,3,4],
+        "min_samples_leaf":  [1],
+        "bootstrap":         [True, False],
+        "criterion":         ["gini", "entropy"]
+    }
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
+    grid_search = GridSearchCV(
+        estimator=rf,
+        param_grid=param_grid,
+        cv=skf,
+        scoring='f1_weighted',
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    grid_search.fit(X_train, y_train)
+    
+    if logger:
+        logger.info("Random Forest GridSearch Complete")
+        logger.info(f"Best Params: {grid_search.best_params_}")
+        logger.info(f"Best Score: {grid_search.best_score_:.4f}")
+    else:
+        print("\n[Random Forest GridSearch Results]")
+        print("Best Params:", grid_search.best_params_)
+        print(f"Best Score: {grid_search.best_score_:.4f}")
+
+    return grid_search.best_estimator_
+
+
+
+
 def objective_cnn(trial, model, train_loader, val_loader, device):
     """
     Objective function for Optuna to optimize CNN hyperparameters.
@@ -1054,7 +1097,7 @@ def main():
             data_dir="./Datasets/BreastMNIST",
             n_components=0,              # set to 0 to skip PCA
             apply_feature_selection=False, # True if you want RFE
-            n_features=20,             # number of features if RFE is applied
+            n_features=None,             # number of features if RFE is applied
             apply_smote = False
         )
         
@@ -1185,10 +1228,10 @@ def main():
             batch_size=32,
             download=True,
             data_dir="./Datasets/BloodMNIST",
-            n_components=50,               # Number of PCA components for RF
-            apply_feature_selection=True,  # Apply RFE for RF
-            n_features=30,                 # Number of features to keep if RFE is applied
-            apply_smote=True               # Apply SMOTE to balance RF training set
+            n_components=0,               # Number of PCA components for RF
+            apply_feature_selection=False,  # Apply RFE for RF
+            n_features=0,                 # Number of features to keep if RFE is applied
+            apply_smote=False               # Apply SMOTE to balance RF training set
         )
 
         # Extract CNN DataLoaders
@@ -1253,6 +1296,8 @@ def main():
 
         # 4. Train Random Forest if selected
         if args.train_rf:
+
+            '''
             # Define a progress bar for Optuna trials
             print("\n--- Hyperparameter Tuning for Random Forest using Optuna ---")
             rf_study = optuna.create_study(direction='maximize', sampler=TPESampler())
@@ -1294,6 +1339,41 @@ def main():
             rf_pbar_train.update(1)
             rf_pbar_train.close()
             logger.info("Trained Random Forest with best hyperparameters.")
+            '''
+
+            logger.info("Performing GridSearch on Random Forest...")
+            best_rf = tune_random_forest(X_train_rf, y_train_rf, logger=logger)
+
+            # Refit best RF on entire training set
+            best_rf.fit(X_train_rf, y_train_rf)
+
+            # Evaluate on Validation
+            val_pred = best_rf.predict(X_val_rf)
+            logger.info("\n[RF Validation Report]")
+            logger.info(classification_report(y_val_rf, val_pred))
+
+            logger.info("Evaluating RF on Test Set...")
+            evaluate_model(best_rf, (X_test_rf, y_test_rf), device=None, model_type='RF', num_classes=8)
+
+            # Save the best RF
+            rf_path = "./B/bloodmnist_rf.joblib"
+            joblib.dump(best_rf, rf_path)
+            logger.info(f"[Saved RF] => {rf_path}")
+
+            # Also save scaler, PCA, and RFE if used
+            scaler_path = "./B/blood_scaler.joblib"
+            joblib.dump(scaler_rf, scaler_path)
+
+            if pca_rf is not None:
+                pca_path = "./B/blood_pca.joblib"
+                joblib.dump(pca_rf, pca_path)
+
+            if selector_rf is not None:
+                rfe_path = "./B/blood_rfe.joblib"
+                joblib.dump(selector_rf, rfe_path)
+            logger.info("Saved preprocessing artifacts for RF.")
+
+            logger.info("Task B Pipeline completed.")
 
             # Evaluate Random Forest on Validation Set
             print("\n--- Evaluating Random Forest on Validation Set ---")
