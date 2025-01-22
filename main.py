@@ -633,40 +633,6 @@ def tune_decision_tree(X_train, y_train, logger=None):
     
     return grid_search
 
-def tune_random_forest(X_train, y_train, logger=None):
-    """
-    Hyperparameter tuning for Random Forest using GridSearchCV.
-    """
-    # Ensure y_train is 1D
-    y_train = y_train.ravel()
-    
-    rf = RandomForestClassifier(random_state=42)
-    param_grid = {
-        'n_estimators': [100, 200, 300],
-        'max_depth': [None, 10, 20, 30],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
-        'bootstrap': [True, False],
-        'criterion': ['gini', 'entropy']
-    }
-    
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    
-    grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, 
-                               cv=skf, n_jobs=-1, scoring='f1_weighted', verbose=1)
-    grid_search.fit(X_train, y_train)  # y_train is now 1D
-    
-    if logger:
-        logger.info("Random Forest Hyperparameter Tuning Completed.")
-        logger.info(f"Best Parameters: {grid_search.best_params_}")
-        logger.info(f"Best F1-Score: {grid_search.best_score_}")
-    else:
-        print("Random Forest Hyperparameter Tuning Completed.")
-        print("Best Parameters:", grid_search.best_params_)
-        print("Best F1-Score:", grid_search.best_score_)
-    
-    return grid_search
-
 
 
 
@@ -1013,7 +979,7 @@ def train_cnn(model, train_loader, val_loader, device, epochs=10, learning_rate=
     return model, train_losses, val_f1_scores
 
 
-def evaluate_model(model, test_loader, device, model_type='CNN'):
+def evaluate_model(model, test_loader, device, model_type='CNN', num_classes=None):
     """
     Evaluate the trained model on the test set.
 
@@ -1043,7 +1009,8 @@ def evaluate_model(model, test_loader, device, model_type='CNN'):
         print(classification_report(all_labels, all_preds))
         # Plot Confusion Matrix
         cm = confusion_matrix(all_labels, all_preds)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=range(8))
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, 
+                                      display_labels=range(num_classes if num_classes else cm.shape[0]))
         disp.plot(cmap=plt.cm.Blues)
         plt.title('CNN Confusion Matrix')
         plt.show()
@@ -1353,7 +1320,7 @@ def main():
             logger.info(classification_report(y_val_rf, val_pred))
 
             logger.info("Evaluating RF on Test Set...")
-            evaluate_model(best_rf, (X_test_rf, y_test_rf), device=None, model_type='RF', num_classes=8)
+            evaluate_model(best_rf, (X_test_rf, y_test_rf), device=None, model_type='RF')
 
             # Save the best RF
             rf_path = "./B/bloodmnist_rf.joblib"
