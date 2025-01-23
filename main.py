@@ -29,6 +29,8 @@ import logging
 from imblearn.over_sampling import SMOTE
 import warnings
 import argparse
+import matplotlib.pyplot as plt
+from sklearn.model_selection import learning_curve
 
 
 
@@ -570,6 +572,8 @@ def setup_logging(log_file='training.log'):
     return logging.getLogger()
 
 
+
+
 #--------------------------------- Hyperparameter Tuning Functions ---------------------------------#
 def objective(trial, X_train_dt, y_train_dt):
     # Define the hyperparameter space
@@ -577,7 +581,6 @@ def objective(trial, X_train_dt, y_train_dt):
     min_samples_split = trial.suggest_int('min_samples_split', 2, 30)
     min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 30)
     criterion = trial.suggest_categorical('criterion', ['gini', 'entropy'])
-    # Example: ccp_alpha in [1e-5, 0.01], log scale
     ccp_alpha = trial.suggest_float('ccp_alpha', 1e-5, 0.01, log=True)
 
     # Create the Decision Tree with suggested hyperparameters
@@ -594,11 +597,30 @@ def objective(trial, X_train_dt, y_train_dt):
     # Evaluate using cross-validation
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     scores = cross_val_score(clf, X_train_dt, y_train_dt, cv=skf, scoring='f1_weighted', n_jobs=-1)
+'''
+    # Plot learning curve
+    train_sizes, train_scores, val_scores = learning_curve(
+        clf, X_train_dt, y_train_dt, cv=skf, scoring='f1_weighted', n_jobs=-1,
+        train_sizes=np.linspace(0.1, 1.0, 10), random_state=42
+    )
+
+    train_scores_mean = np.mean(train_scores, axis=1)
+    val_scores_mean = np.mean(val_scores, axis=1)
+
+    plt.figure()
+    plt.plot(train_sizes, train_scores_mean, label='Training score')
+    plt.plot(train_sizes, val_scores_mean, label='Validation score')
+    plt.xlabel('Training Set Size')
+    plt.ylabel('F1 Score')
+    plt.title('Learning Curve')
+    plt.legend()
+    plt.grid()
+    plt.savefig(f'learning_curve_trial_{trial.number}.png')
+    plt.close()
 
     # Return the average F1-Score
     return scores.mean()
-
-
+'''
 
 
 def tune_decision_tree(X_train, y_train, logger=None):
@@ -1072,7 +1094,7 @@ def evaluate_model(model, test_loader, device, model_type='CNN', num_classes=Non
 
 
 
-Task = 'B'  # Choose 'A' or 'B' for the respective task
+Task = 'A'  # Choose 'A' or 'B' for the respective task
 
 
 
@@ -1120,7 +1142,7 @@ def main():
         print(" - X_test_dt:", X_test_dt.shape)
         print(" - y_test_dt:", y_test_dt.shape)
 
-        '''
+        
         # Step 2: Hyperparameter Tuning with Optuna
         print("\nStarting Decision Tree Hyperparameter Tuning with Optuna.")
         study = optuna.create_study(direction='maximize')
@@ -1156,8 +1178,8 @@ def main():
         test_report = classification_report(y_test_dt, y_test_pred_dt)
         print("\nDecision Tree (Task A) Test Results:")
         print(test_report)
+        
         '''
-
         # Step 2: Hyperparameter Tuning
         logger.info("Starting Decision Tree Hyperparameter Tuning.")
         dt_grid_search = tune_decision_tree(X_train_dt, y_train_dt, logger=logger)
@@ -1169,7 +1191,7 @@ def main():
         
         # Retrain best Decision Tree on the entire training set
         best_dt.fit(X_train_dt, y_train_dt)
-        
+        '''
         # Step 3: Evaluate on Validation & Test
         print("\nDecision Tree (Task A) Validation Results:")
         y_val_pred_dt = best_dt.predict(X_val_dt)
