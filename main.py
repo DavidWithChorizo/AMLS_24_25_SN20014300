@@ -632,9 +632,9 @@ def tune_decision_tree(X_train, y_train, logger=None):
     
     dt = DecisionTreeClassifier(random_state=42)
     param_grid = {
-        'max_depth': [None, 3, 5, 7, 10, 12, 15, 17, 20, 23, 26, 30],
-        'min_samples_split': [2, 5,7, 10],
-        'min_samples_leaf': [1, 2, 4, 8],
+        'max_depth': [30,35,40,45],
+        'min_samples_split': [2, 5],
+        'min_samples_leaf': [1, 2, 3],
         'criterion': ['gini', 'entropy']
     }
     
@@ -830,10 +830,10 @@ def tune_random_forest(X_train, y_train, logger=None):
     rf = RandomForestClassifier(random_state=42, class_weight='balanced')
     
     param_grid = {
-        "n_estimators":      [110, 150],
-        "max_depth":         [35, 38,40, 42, 45, 47,50],
+        "n_estimators":      [50],
+        "max_depth":         [10,15,20],
         "min_samples_split": [2,3,4],
-        "min_samples_leaf":  [1],
+        "min_samples_leaf":  [2,5],
         "bootstrap":         [True, False],
         "criterion":         ["gini", "entropy"]
     }
@@ -859,7 +859,7 @@ def tune_random_forest(X_train, y_train, logger=None):
         current_best = max(current_best, score)
         best_so_far.append(current_best)
 
-    plt.plot(best_so_far, marker='o', label='Best so far')
+    plt.plot(best_so_far, marker='.', label='Best so far')
     plt.xlabel('Param Set Index')
     plt.ylabel('F1 Score')
     plt.title('GridSearchCV Param Sets vs. F1')
@@ -1094,7 +1094,7 @@ def evaluate_model(model, test_loader, device, model_type='CNN', num_classes=Non
 
 
 
-Task = 'A'  # Choose 'A' or 'B' for the respective task
+Task = 'B'  # Choose 'A' or 'B' for the respective task
 
 
 
@@ -1142,7 +1142,7 @@ def main():
         print(" - X_test_dt:", X_test_dt.shape)
         print(" - y_test_dt:", y_test_dt.shape)
 
-        
+        '''
         # Step 2: Hyperparameter Tuning with Optuna
         print("\nStarting Decision Tree Hyperparameter Tuning with Optuna.")
         study = optuna.create_study(direction='maximize')
@@ -1166,21 +1166,10 @@ def main():
         )
         
         best_dt.fit(X_train_dt, y_train_dt)
-
-        # Evaluate on Validation Set
-        y_val_pred_dt = best_dt.predict(X_val_dt)
-        val_report = classification_report(y_val_dt, y_val_pred_dt)
-        print("\nDecision Tree (Task A) Validation Results:")
-        print(val_report)
-
-        # Evaluate on Test Set
-        y_test_pred_dt = best_dt.predict(X_test_dt)
-        test_report = classification_report(y_test_dt, y_test_pred_dt)
-        print("\nDecision Tree (Task A) Test Results:")
-        print(test_report)
-        
         '''
-        # Step 2: Hyperparameter Tuning
+        
+        
+        # Step 2: Hyperparameter Tuning with GridSearchCV
         logger.info("Starting Decision Tree Hyperparameter Tuning.")
         dt_grid_search = tune_decision_tree(X_train_dt, y_train_dt, logger=logger)
         
@@ -1191,7 +1180,7 @@ def main():
         
         # Retrain best Decision Tree on the entire training set
         best_dt.fit(X_train_dt, y_train_dt)
-        '''
+        
         # Step 3: Evaluate on Validation & Test
         print("\nDecision Tree (Task A) Validation Results:")
         y_val_pred_dt = best_dt.predict(X_val_dt)
@@ -1253,7 +1242,7 @@ def main():
             batch_size=32,
             download=True,
             data_dir="./Datasets/BloodMNIST",
-            n_components=0,               # Number of PCA components for RF
+            n_components=50,               # Number of PCA components for RF
             apply_feature_selection=False,  # Apply RFE for RF
             n_features=0,                 # Number of features to keep if RFE is applied
             apply_smote=False               # Apply SMOTE to balance RF training set
@@ -1388,9 +1377,10 @@ def main():
             logger.info("Trained Random Forest with best hyperparameters.")
             '''
 
+            #Gridsearch method
             logger.info("Performing GridSearch on Random Forest...")
             best_rf = tune_random_forest(X_train_rf, y_train_rf, logger=logger)
-
+            
             # Refit best RF on entire training set
             best_rf.fit(X_train_rf, y_train_rf)
 
@@ -1437,6 +1427,7 @@ def main():
             rf_model_path = "./B/bloodmnist_rf.joblib"
             joblib.dump(best_rf, rf_model_path)
             logger.info(f"Saved Random Forest model to {rf_model_path}.")
+            
 
         # 5. Save Preprocessing Artifacts if RF was trained
         if args.train_rf:
