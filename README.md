@@ -82,6 +82,6 @@ Both tasks share common utility functions for:
 	•	Random Forest artifacts are saved in ./B/bloodmnist_rf.joblib (plus any scaler, PCA, or RFE selectors)
 
 
-Acknowledgments
+## Acknowledgments
 	•	MedMNIST for providing the benchmark medical image datasets.
 	•	scikit-learn, PyTorch, and Optuna for the core libraries used here.
