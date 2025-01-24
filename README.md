@@ -1,4 +1,8 @@
 # AMLS_24_25_SN20014300
+## IMPORTANT
+** A Delayed Assessment Permit was applied and approved on this specific coursework. Therefore, the deadline is moved to the 18:00 on the 24th of January. Hence, the modifications made prior to the new deadline should be taken into account.**
+
+
 ## Overview
 
 This repository contains two separate machine learning tasks (A & B) using data from **MedMNIST**:
