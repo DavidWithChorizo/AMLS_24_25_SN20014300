@@ -16,7 +16,23 @@ Both tasks share common utility functions for:
 - Hyperparameter tuning using **GridSearchCV** (with optional **Optuna** code commented out if you want to explore that).
 
 ---
+## Running the code
 
+1. **Task A: Decision Tree + BreastMNIST**
+	1.	Set Task = 'A' at the top of main.py (it’s already configured, but confirm if needed).
+	2.	Run the script (no special arguments for Task A):
+        python main.py
+
+2. **Task B: CNN and/or Random Forest + BloodMNIST**
+    1.	Set Task = 'B' at the top of main.py.
+	2.	Command-line flags:
+	•	--train_cnn: Trains the CNN model on BloodMNIST.
+	•	--train_rf:  Trains the Random Forest model on BloodMNIST.
+    3.	Examples:
+	•	Train ONLY the CNN:
+    python main.py --train_cnn
+    •	Train ONLY the RF:
+    python main.py --train_rf
 ## Data
 
 **BreastMNIST** and **BloodMNIST** come from the [MedMNIST](https://medmnist.com/) collection. The script will automatically download the data into the specified directories:
