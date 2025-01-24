@@ -54,6 +54,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # Task A: Decision Tree with BreastMNIST
 # Task B: CNN + RandomForest with BloodMNIST
 Task = 'B'  
+#Pick which model to run by switching the MODELO from CNN to RF for Task B
+MODELO = "CNN"
 
 ################################################################################
 #                         Dataset Preparation Codes
@@ -1251,7 +1253,7 @@ def main():
         cnn_trained = None
         rf_trained  = None
 
-        if args.train_cnn:
+        if MODELO == "CNN":
             num_classes = 8  
             cnn_model = BloodMNIST_CNN(num_classes=num_classes)
 
@@ -1295,7 +1297,7 @@ def main():
             torch.save(cnn_trained.state_dict(), cnn_model_path)
             logger.info(f"Saved CNN model to {cnn_model_path}.")
 
-        if args.train_rf:
+        if MODELO == "RF":
             '''
             # The following Optuna-based search is commented out intentionally; do not remove:
             # print("\n--- Hyperparameter Tuning for Random Forest using Optuna ---")
