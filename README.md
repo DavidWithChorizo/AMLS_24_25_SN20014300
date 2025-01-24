@@ -21,7 +21,8 @@ Both tasks share common utility functions for:
 1. **Task A: Decision Tree + BreastMNIST**
 	1.	Set Task = 'A' at the top of main.py (it’s already configured, but confirm if needed).
 	2.	Run the script (no special arguments for Task A):
-        python main.py
+    		```bash
+        	python main.py
 
 2. **Task B: CNN and/or Random Forest + BloodMNIST**
     1.	Set Task = 'B' at the top of main.py.
@@ -31,10 +32,10 @@ Both tasks share common utility functions for:
     3.	Examples:
 	•	Train ONLY the CNN:
 		```bash
-		    python main.py --train_cnn
+		python main.py --train_cnn
 	•	Train ONLY the RF:
 		```bash
-		    python main.py --train_rf
+		 python main.py --train_rf
 ## Data
 
 **BreastMNIST** and **BloodMNIST** come from the [MedMNIST](https://medmnist.com/) collection. The script will automatically download the data into the specified directories:
