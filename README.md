@@ -30,8 +30,10 @@ Both tasks share common utility functions for:
 	•	python main.py --train_rf:  Trains the Random Forest model on BloodMNIST.
     3.	Examples:
 	•	Train ONLY the CNN:
+		```bash
 		    python main.py --train_cnn
 	•	Train ONLY the RF:
+		```bash
 		    python main.py --train_rf
 ## Data
 
